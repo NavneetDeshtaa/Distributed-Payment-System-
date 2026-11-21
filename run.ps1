@@ -9,7 +9,7 @@ $env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.21.102-hotspot"
 $env:Path = "$env:JAVA_HOME\bin;" + $env:Path
 
 # 1. Start Docker Infrastructure
-Write-Host "`n[1/5] Ensuring Docker Infrastructure is UP (Postgres, Redis, Kafka, ZooKeeper)..." -ForegroundColor Yellow
+Write-Host "`n[1/5] Ensuring Docker Infrastructure is UP (Redis, Kafka, ZooKeeper, Prometheus, Grafana)..." -ForegroundColor Yellow
 docker compose up -d
 
 # 2. Build Multi-Module Projects if needed

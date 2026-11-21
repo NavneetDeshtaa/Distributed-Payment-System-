@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Send, RefreshCw, CheckCircle2, XCircle, Clock, ShieldCheck, ArrowRight, ShieldAlert, Sparkles, CreditCard } from 'lucide-react';
 import { submitPayment, getPayment, getLedgerForPayment } from '../services/api';
 
@@ -15,8 +15,28 @@ export default function PaymentTerminal({ token, defaultUser = 'alice', onPaymen
   const [paymentLedger, setPaymentLedger] = useState([]);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    if (defaultUser) {
+      setUserId(defaultUser);
+    }
+  }, [defaultUser]);
+
   const handleGenerateKey = () => {
     setIdempotencyKey(crypto.randomUUID());
+  };
+
+  const handleRefreshPayment = async () => {
+    if (!currentPayment?.id) return;
+    try {
+      const updated = await getPayment(currentPayment.id);
+      setCurrentPayment(updated);
+      if (updated.status === 'SUCCESS') {
+        const entries = await getLedgerForPayment(currentPayment.id);
+        setPaymentLedger(entries);
+      }
+    } catch (e) {
+      console.error('Failed to refresh payment status:', e);
+    }
   };
 
   const setPreset = (amt, curr = 'USD') => {
@@ -58,7 +78,7 @@ export default function PaymentTerminal({ token, defaultUser = 'alice', onPaymen
           const updated = await getPayment(paymentId);
           setCurrentPayment(updated);
 
-          if (updated.status === 'SUCCESS' || updated.status === 'FRAUD_REJECTED' || attempts >= 8) {
+          if (updated.status === 'SUCCESS' || updated.status === 'FRAUD_REJECTED' || updated.status === 'FAILED' || attempts >= 15) {
             clearInterval(pollInterval);
             setLoading(false);
 
@@ -256,10 +276,21 @@ export default function PaymentTerminal({ token, defaultUser = 'alice', onPaymen
       <div className="lg:col-span-6 space-y-4">
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs h-full flex flex-col justify-between">
           <div>
-            <h3 className="text-base font-semibold text-slate-900 mb-1 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-600" />
-              Live Transaction Monitor
-            </h3>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                Live Transaction Monitor
+              </h3>
+              {currentPayment && (
+                <button
+                  type="button"
+                  onClick={handleRefreshPayment}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-sans font-medium px-2 py-1 rounded-md bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" /> Refresh Status
+                </button>
+              )}
+            </div>
             <p className="text-xs text-slate-500 mb-4">
               Observe instant HTTP 201 response and asynchronous double-entry settlement
             </p>
@@ -296,6 +327,11 @@ export default function PaymentTerminal({ token, defaultUser = 'alice', onPaymen
                       {currentPayment.status === 'FRAUD_REJECTED' && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-medium">
                           <XCircle className="w-3.5 h-3.5" /> FRAUD_REJECTED
+                        </span>
+                      )}
+                      {currentPayment.status === 'FAILED' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-medium">
+                          <XCircle className="w-3.5 h-3.5" /> FAILED (Settlement Aborted)
                         </span>
                       )}
                     </div>

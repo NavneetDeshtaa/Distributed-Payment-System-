@@ -87,10 +87,13 @@ DistributedPaymentSystem/
 │   │   └── index.css     # Clean Tailwind CSS Styles
 │   ├── package.json
 │   └── vite.config.js
+├── monitoring/           # Observability Stack (Prometheus + Grafana)
+│   ├── prometheus.yml    # Prometheus Scraper Config (Port 9090)
+│   └── grafana/          # Auto-Provisioned Dashboards & Datasources (Port 3001)
 ├── scripts/              # Consolidated Verification & Chaos Engineering Scripts
 │   ├── test-all.ps1      # Master Automated Test Suite
 │   └── verify-ledger-invariant.sql
-├── docker-compose.yml    # Kafka, ZooKeeper, Redis
+├── docker-compose.yml    # Kafka, ZooKeeper, Redis 7, Prometheus, Grafana
 ├── pom.xml               # Multi-Module Parent Aggregator POM
 ├── run.bat & run.ps1     # One-Click System Launchers
 └── README.md

@@ -115,3 +115,21 @@ CREATE INDEX IF NOT EXISTS idx_outbox_status_created ON outbox_events(status, cr
 CREATE INDEX IF NOT EXISTS idx_processed_events_processed_at ON processed_events(processed_at);
 CREATE INDEX IF NOT EXISTS idx_webhook_status_retry ON webhook_deliveries(status, next_retry_at);
 CREATE INDEX IF NOT EXISTS idx_reconciliation_alerts_type ON reconciliation_alerts(alert_type, created_at);
+
+-- =========================================================================
+-- Default Demo Accounts (Alice, Bob, Charlie & Merchants)
+-- =========================================================================
+INSERT INTO accounts (id, owner_id, balance, currency, version, created_at, updated_at)
+VALUES 
+    ('a0000000-0000-0000-0000-000000000001', 'alice', 10000.0000, 'USD', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('a0000000-0000-0000-0000-000000000002', 'bob', 10000.0000, 'USD', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('a0000000-0000-0000-0000-000000000003', 'charlie', 10000.0000, 'USD', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('a0000000-0000-0000-0000-000000000004', 'm1', 5000.0000, 'USD', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('a0000000-0000-0000-0000-000000000005', 'm2', 5000.0000, 'USD', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (owner_id) DO NOTHING;
+
+-- Default Merchant Webhook registration for m1
+INSERT INTO merchant_webhooks (id, merchant_id, url, secret, active, created_at)
+VALUES 
+    ('b0000000-0000-0000-0000-000000000001', 'm1', 'http://localhost:8080/simulation/webhooks/mock-merchant', 'whsec_sample_secret_key_123', true, CURRENT_TIMESTAMP)
+ON CONFLICT (merchant_id) DO NOTHING;

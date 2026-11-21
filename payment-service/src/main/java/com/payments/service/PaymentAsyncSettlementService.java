@@ -71,10 +71,28 @@ public class PaymentAsyncSettlementService {
         BigDecimal amount = event.getAmount().setScale(4, RoundingMode.HALF_UP);
 
         Account payerAccount = accountRepository.findByOwnerId(event.getUserId())
-                .orElseThrow(() -> new AccountNotFoundException("Payer account not found: " + event.getUserId()));
+                .orElseGet(() -> {
+                    log.info("Auto-provisioning missing payer account for userId={}", event.getUserId());
+                    Account newAccount = new Account();
+                    newAccount.setId(UUID.randomUUID());
+                    newAccount.setOwnerId(event.getUserId());
+                    newAccount.setBalance(new BigDecimal("10000.0000"));
+                    newAccount.setCurrency(event.getCurrency() != null ? event.getCurrency() : "USD");
+                    newAccount.setVersion(0L);
+                    return accountRepository.saveAndFlush(newAccount);
+                });
 
         Account merchantAccount = accountRepository.findByOwnerId(event.getMerchantId())
-                .orElseThrow(() -> new AccountNotFoundException("Merchant account not found: " + event.getMerchantId()));
+                .orElseGet(() -> {
+                    log.info("Auto-provisioning missing merchant account for merchantId={}", event.getMerchantId());
+                    Account newAccount = new Account();
+                    newAccount.setId(UUID.randomUUID());
+                    newAccount.setOwnerId(event.getMerchantId());
+                    newAccount.setBalance(BigDecimal.ZERO.setScale(4));
+                    newAccount.setCurrency(event.getCurrency() != null ? event.getCurrency() : "USD");
+                    newAccount.setVersion(0L);
+                    return accountRepository.saveAndFlush(newAccount);
+                });
 
         if (!payerAccount.getCurrency().equalsIgnoreCase(event.getCurrency())) {
             throw new CurrencyMismatchException("Payer currency mismatch");

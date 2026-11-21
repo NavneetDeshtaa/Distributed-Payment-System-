@@ -8,7 +8,7 @@ set "JAVA_HOME=C:\Program Files\Microsoft\jdk-17.0.21.102-hotspot"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
 echo.
-echo [1/5] Ensuring Docker Infrastructure is UP (Redis, Kafka, ZooKeeper)...
+echo [1/5] Ensuring Docker Infrastructure is UP (Redis, Kafka, ZooKeeper, Prometheus, Grafana)...
 docker compose up -d
 
 echo.

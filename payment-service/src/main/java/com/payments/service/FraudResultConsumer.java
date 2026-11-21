@@ -62,12 +62,13 @@ public class FraudResultConsumer {
     @KafkaListener(topics = "fraud.result", groupId = "fraud-result-consumer-group")
     public void consumeFraudResult(ConsumerRecord<String, String> record, Acknowledgment ack) {
         String traceId = KafkaHeaderUtil.setupMdc(record);
+        Payment payment = null;
 
         try {
             FraudResultEvent result = objectMapper.readValue(record.value(), FraudResultEvent.class);
             UUID paymentId = UUID.fromString(result.getPaymentId());
 
-            Payment payment = paymentRepository.findById(paymentId)
+            payment = paymentRepository.findById(paymentId)
                     .orElse(null);
 
             if (payment == null) {
@@ -121,6 +122,14 @@ public class FraudResultConsumer {
 
         } catch (Exception ex) {
             log.error("Error processing fraud.result: {}", ex.getMessage(), ex);
+            try {
+                if (payment != null && payment.getStatus() == PaymentStatus.PENDING) {
+                    payment.setStatus(PaymentStatus.FAILED);
+                    paymentRepository.saveAndFlush(payment);
+                }
+            } catch (Exception markEx) {
+                log.error("Failed to mark payment as FAILED: {}", markEx.getMessage());
+            }
             if (ack != null) ack.acknowledge();
         } finally {
             KafkaHeaderUtil.clearMdc();
