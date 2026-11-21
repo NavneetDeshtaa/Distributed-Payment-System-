@@ -36,13 +36,13 @@ export default function App() {
 
   useEffect(() => {
     checkHealth();
-    handleMintToken(); // auto mint initial token for alice
+    handleMintToken(); // auto mint initial token
     const interval = setInterval(checkHealth, 5000);
     return () => clearInterval(interval);
   }, [user]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex flex-col font-sans">
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -53,7 +53,7 @@ export default function App() {
         onMintToken={handleMintToken}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'topology' && <TopologyView health={health} />}
         {activeTab === 'terminal' && <PaymentTerminal token={token} defaultUser={user} />}
         {activeTab === 'fraud' && <FraudLab />}
@@ -64,8 +64,8 @@ export default function App() {
         {activeTab === 'ledger' && <LedgerViewer />}
       </main>
 
-      <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 font-mono">
-        Distributed Payment Processing Infrastructure • Spring Cloud Gateway :8090 • Spring Boot :8080 • Python FastAPI ML :8000 • Kafka :9092
+      <footer className="border-t border-slate-200/80 bg-white py-4 text-center text-xs text-slate-500 font-mono">
+        Distributed Payment Engine • Spring Cloud Gateway :8090 • Spring Boot :8080 • Python FastAPI ML :8000 • Kafka :9092
       </footer>
     </div>
   );

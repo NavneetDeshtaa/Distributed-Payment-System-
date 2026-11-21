@@ -1,87 +1,91 @@
 import React from 'react';
-import { ShieldCheck, Activity, Key, Server, Cpu, Layers } from 'lucide-react';
+import { ShieldCheck, Activity, Key, Server, Cpu, Layers, CheckCircle2, ChevronRight, User } from 'lucide-react';
 
 export default function Header({ activeTab, setActiveTab, health, token, user, setUser, onMintToken }) {
   const getBadgeClass = (status) => {
-    if (status === 'UP') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-    if (status === 'DEGRADED') return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
-    return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
+    if (status === 'UP') return 'bg-emerald-50 text-emerald-700 border-emerald-200/80';
+    if (status === 'DEGRADED') return 'bg-amber-50 text-amber-700 border-amber-200/80';
+    return 'bg-rose-50 text-rose-700 border-rose-200/80';
   };
 
   const navItems = [
-    { id: 'topology', label: 'Topology & Health', icon: Layers },
+    { id: 'topology', label: 'Topology & Flow', icon: Layers },
     { id: 'terminal', label: 'Payment Terminal', icon: ShieldCheck },
-    { id: 'fraud', label: 'Polyglot ML Fraud', icon: Cpu },
+    { id: 'fraud', label: 'ML Fraud Detection', icon: Cpu },
     { id: 'tracing', label: 'Distributed Tracing', icon: Activity },
     { id: 'backpressure', label: 'Adaptive Backpressure', icon: Server },
-    { id: 'reconciliation', label: 'Financial Recon (5 Audits)', icon: ShieldCheck },
-    { id: 'webhooks', label: 'Reliable Webhooks', icon: Key },
+    { id: 'reconciliation', label: 'Financial Recon', icon: ShieldCheck },
+    { id: 'webhooks', label: 'Webhooks & HMAC', icon: Key },
     { id: 'ledger', label: 'Double-Entry Ledger', icon: Layers }
   ];
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50">
+    <header className="bg-white border-b border-slate-200/80 sticky top-0 z-50 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
+          {/* Logo & Product Title */}
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-600/30">
-              <ShieldCheck className="w-6 h-6 text-white" />
+            <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-xs">
+              <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-white tracking-tight">FinScale Engine</span>
-                <span className="px-2 py-0.5 text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-full">
-                  Phase 5 Full Stack
+                <span className="font-bold text-slate-900 tracking-tight text-base">FinScale Engine</span>
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  v5.0 Enterprise
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono">Distributed • Exactly-Once • Polyglot ML • Reconciled</p>
+              <p className="text-xs text-slate-500">Distributed • Exactly-Once • Polyglot ML • Reconciled</p>
             </div>
           </div>
 
           {/* Microservices Health Bar */}
           <div className="hidden lg:flex items-center gap-2 text-xs font-mono">
             <div className={`px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${getBadgeClass(health?.gateway?.status)}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${health?.gateway?.status === 'UP' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${health?.gateway?.status === 'UP' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               Gateway :8090
             </div>
             <div className={`px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${getBadgeClass(health?.payment?.status)}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${health?.payment?.status === 'UP' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${health?.payment?.status === 'UP' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               Payment :8080
             </div>
             <div className={`px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${getBadgeClass(health?.fraud?.status)}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${health?.fraud?.status === 'UP' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${health?.fraud?.status === 'UP' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               Fraud AI :8000
             </div>
           </div>
 
           {/* User & Auth Controls */}
           <div className="flex items-center gap-3">
-            <select
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              className="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value="alice">Alice (Payer)</option>
-              <option value="bob">Bob (Merchant)</option>
-              <option value="attacker-1">Attacker (Velocity Test)</option>
-            </select>
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                className="bg-transparent font-medium text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="alice">Alice (Payer)</option>
+                <option value="bob">Bob (Merchant)</option>
+                <option value="attacker-1">Attacker (Velocity Test)</option>
+              </select>
+            </div>
 
             <button
               onClick={onMintToken}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
                 token
-                  ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-600/30'
-                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-750'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100/70'
+                  : 'bg-indigo-600 text-white border-transparent hover:bg-indigo-700 shadow-xs'
               }`}
             >
               <Key className="w-3.5 h-3.5" />
-              {token ? 'Token Active' : 'Mint JWT'}
+              {token ? 'JWT Active' : 'Mint JWT'}
             </button>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-1 overflow-x-auto py-2 border-t border-slate-800/80 scrollbar-none">
+        {/* Navigation Tabs (Minimalist Light Segmented Control) */}
+        <nav className="flex space-x-1 overflow-x-auto py-2 border-t border-slate-100 scrollbar-none">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -89,13 +93,13 @@ export default function Header({ activeTab, setActiveTab, health, token, user, s
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-all ${
                   isActive
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                 {item.label}
               </button>
             );

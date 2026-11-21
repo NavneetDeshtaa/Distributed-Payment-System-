@@ -1,147 +1,152 @@
 import React from 'react';
-import { Network, ArrowRight, Database, Server, Cpu, CheckCircle2, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
+import { Network, CheckCircle2, ArrowRight, Zap, Shield, Database, Server, Cpu, Box } from 'lucide-react';
 
 export default function TopologyView({ health }) {
   const nodes = [
     {
-      id: 'client',
-      title: 'Client / React App',
-      subtitle: 'Vite Frontend (Port 3000)',
-      role: 'Browser',
-      color: 'border-blue-500/50 bg-blue-500/10 text-blue-400',
-      status: 'UP'
-    },
-    {
       id: 'gateway',
       title: 'Spring Cloud Gateway',
-      subtitle: 'Edge Gateway (Port 8090)',
+      subtitle: 'Edge API Gateway • Port 8090',
       role: 'Reverse Proxy & JWT Auth',
-      color: 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400',
+      color: 'border-blue-200 bg-blue-50/50 text-blue-800',
       status: health?.gateway?.status || 'UP',
-      details: 'HS256 Token Verify • Sub Enrichment • Circuit Breaker'
+      details: 'HS256 Token Verify • Request Enrichment (X-User-Id, X-Correlation-ID) • Circuit Breaker'
     },
     {
       id: 'payment',
-      title: 'Payment Service',
-      subtitle: 'Spring Boot 3 (Port 8080)',
-      role: 'Core Financial Engine',
-      color: 'border-indigo-500/50 bg-indigo-500/10 text-indigo-400',
+      title: 'Payment Core Service',
+      subtitle: 'Spring Boot 3.4 • Port 8080',
+      role: 'Financial Transaction Engine',
+      color: 'border-indigo-200 bg-indigo-50/50 text-indigo-800',
       status: health?.payment?.status || 'UP',
-      details: 'Transactional Outbox • Idempotency • Ledger Invariant'
-    },
-    {
-      id: 'kafka',
-      title: 'Apache Kafka 7.5',
-      subtitle: 'Message Broker (Port 9092)',
-      role: 'Event Spine',
-      color: 'border-amber-500/50 bg-amber-500/10 text-amber-400',
-      status: 'UP',
-      details: 'Topics: payment.created • fraud.request • fraud.result'
+      details: 'Transactional Outbox • Double-Entry Ledger • Idempotent Consumer (processed_events)'
     },
     {
       id: 'fraud',
       title: 'Polyglot Fraud AI',
-      subtitle: 'Python FastAPI (Port 8000)',
-      role: 'Deterministic + ML Anomaly',
-      color: 'border-purple-500/50 bg-purple-500/10 text-purple-400',
+      subtitle: 'Python FastAPI • Port 8000',
+      role: 'Deterministic Rules & ML',
+      color: 'border-purple-200 bg-purple-50/50 text-purple-800',
       status: health?.fraud?.status || 'UP',
-      details: 'Stage 1 Rules (Redis Velocity) • Stage 2 IsolationForest'
+      details: 'Stage 1 Rules (Redis Velocity, $10k Limit) • Stage 2 IsolationForest ML Anomaly Scoring'
     },
     {
-      id: 'storage',
-      title: 'PostgreSQL 15 & Redis 7',
-      subtitle: 'DB & Multi-Layer Cache',
-      role: 'Persistent Ledger & Cache',
-      color: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400',
+      id: 'kafka',
+      title: 'Apache Kafka 7.5 Spine',
+      subtitle: 'Event Broker • Port 9092',
+      role: 'Asynchronous Event Bus',
+      color: 'border-amber-200 bg-amber-50/50 text-amber-800',
       status: 'UP',
-      details: 'Double-entry Invariant • processed_events EOS • Redis TTL'
+      details: 'Topics: payment.created • fraud.request • fraud.result • fraud.alerts • webhook.DLQ'
+    },
+    {
+      id: 'redis',
+      title: 'Redis 7 Multi-Layer Cache',
+      subtitle: 'In-Memory Store • Port 6380',
+      role: 'Sub-ms Idempotency & Rate Limit',
+      color: 'border-rose-200 bg-rose-50/50 text-rose-800',
+      status: 'UP',
+      details: 'Layer 1 Idempotency (24h TTL) • Atomic Lua Token Bucket • Sliding-Window Velocity'
+    },
+    {
+      id: 'postgres',
+      title: 'PostgreSQL 15 Ledger DB',
+      subtitle: 'Relational DB • Port 5432',
+      role: 'System of Financial Record',
+      color: 'border-emerald-200 bg-emerald-50/50 text-emerald-800',
+      status: 'UP',
+      details: 'Double-entry Invariant: SUM(DEBIT) = SUM(CREDIT) • @Version Optimistic Locks • NUMERIC(19,4)'
+    }
+  ];
+
+  const steps = [
+    {
+      num: 1,
+      title: 'Edge Authentication & Request Enrichment',
+      desc: 'Client sends HTTP POST with JWT token. Spring Cloud Gateway validates HMAC-SHA256, extracts sub claim into X-User-Id, injects X-Correlation-ID and x-trace-id, strips the raw auth token, and routes to Payment Core Service.'
+    },
+    {
+      num: 2,
+      title: 'Atomic Ingestion & Transactional Outbox Pattern',
+      desc: 'Payment Service creates the transaction with status PENDING and simultaneously writes an OutboxEvent (NEW) inside the same atomic PostgreSQL transaction. Client instantly receives HTTP 201. Background poller publishes to payment.created.'
+    },
+    {
+      num: 3,
+      title: 'Polyglot Request-Reply Fraud Evaluation',
+      desc: 'PaymentEventConsumer routes the message to Kafka topic fraud.request with distributed trace headers. Python FastAPI worker evaluates Stage 1 Deterministic Rules (amount, currency, Redis velocity) and Stage 2 IsolationForest ML anomaly score, publishing to fraud.result.'
+    },
+    {
+      num: 4,
+      title: 'Double-Entry Settlement & Reliable HMAC Webhook',
+      desc: 'FraudResultConsumer reads the result. If clean: atomically debits payer, credits merchant, records balanced double-entry ledger rows, marks status SUCCESS, and fires HMAC-SHA256 signed webhook with exponential backoff. If fraud: marks status FRAUD_REJECTED.'
     }
   ];
 
   return (
     <div className="space-y-6">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-4">
+      {/* Topology Header Card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Network className="w-5 h-5 text-indigo-400" />
-              Polyglot Microservices Topology
+            <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+              <Network className="w-5 h-5 text-indigo-600" />
+              Microservices Topology & Health
             </h2>
-            <p className="text-xs text-slate-400">
-              Interactive high-level architecture with end-to-end request lifecycle and message flows
+            <p className="text-xs text-slate-500 mt-0.5">
+              Multi-language distributed system architecture with asynchronous event-driven messaging
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-              <CheckCircle2 className="w-3.5 h-3.5" /> All Microservices Connected
-            </span>
-          </div>
+          <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200">
+            <CheckCircle2 className="w-3.5 h-3.5" /> All Microservices Connected & Healthy
+          </span>
         </div>
 
-        {/* Topology Grid */}
+        {/* Nodes Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {nodes.map((node) => (
-            <div key={node.id} className={`border rounded-lg p-4 bg-slate-950/60 transition-all ${node.color}`}>
+            <div key={node.id} className="border border-slate-200 rounded-xl p-4 bg-white hover:border-slate-300 transition-all shadow-xs">
               <div className="flex items-start justify-between">
                 <div>
-                  <span className="text-[10px] font-mono tracking-wider uppercase opacity-75">{node.role}</span>
-                  <h3 className="font-bold text-white text-sm mt-0.5">{node.title}</h3>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">{node.subtitle}</p>
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-semibold text-slate-400">
+                    {node.role}
+                  </span>
+                  <h3 className="font-semibold text-slate-900 text-sm mt-0.5">{node.title}</h3>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">{node.subtitle}</p>
                 </div>
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  UP
+                </span>
               </div>
-              {node.details && (
-                <div className="mt-3 pt-3 border-t border-slate-800 text-[11px] font-mono text-slate-400">
-                  {node.details}
-                </div>
-              )}
+              <p className="text-xs text-slate-600 font-mono mt-3 pt-3 border-t border-slate-100 leading-relaxed">
+                {node.details}
+              </p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Lifecycle Flow Diagram */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-          <Zap className="w-4 h-4 text-amber-400" />
-          End-to-End Request-Reply Flow & Distributed Tracing
+      {/* End-to-End Request Lifecycle */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+        <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-indigo-600" />
+          End-to-End Request Lifecycle & Distributed Tracing
         </h3>
 
-        <div className="relative border-l-2 border-indigo-500/30 pl-4 space-y-4 text-xs font-mono">
-          <div className="relative">
-            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500" />
-            <div className="font-semibold text-slate-200">1. Edge Authentication & Request Enrichment</div>
-            <p className="text-slate-400 mt-0.5">
-              Client sends HTTP POST with <code className="text-indigo-300">Authorization: Bearer &lt;JWT&gt;</code>.
-              Spring Cloud Gateway validates HMAC-SHA256, extracts <code className="text-indigo-300">sub</code> into <code className="text-indigo-300">X-User-Id</code>, generates <code className="text-indigo-300">X-Correlation-ID</code>, strips auth token, and routes to Payment Service.
-            </p>
-          </div>
-
-          <div className="relative">
-            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-500" />
-            <div className="font-semibold text-slate-200">2. Ingestion & Transactional Outbox Pattern</div>
-            <p className="text-slate-400 mt-0.5">
-              Payment Service atomically persists Payment (<code className="text-amber-300">PENDING</code>) and <code className="text-indigo-300">outbox_events</code> in a single PostgreSQL transaction. Client instantly receives HTTP 201 Created. Outbox poller publishes to Kafka topic <code className="text-indigo-300">payment.created</code>.
-            </p>
-          </div>
-
-          <div className="relative">
-            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-purple-500" />
-            <div className="font-semibold text-slate-200">3. Polyglot Asynchronous Fraud Evaluation</div>
-            <p className="text-slate-400 mt-0.5">
-              Payment consumer forwards to <code className="text-indigo-300">fraud.request</code> with Kafka tracing headers (<code className="text-purple-300">x-trace-id</code>).
-              Python FastAPI worker runs Stage 1 (Allowlisted currencies, $10,000 threshold, Redis sliding-window velocity) and Stage 2 (Scikit-Learn IsolationForest anomaly scoring). Result published to <code className="text-indigo-300">fraud.result</code>.
-            </p>
-          </div>
-
-          <div className="relative">
-            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <div className="font-semibold text-slate-200">4. Double-Entry Settlement & Reliable Webhook Dispatch</div>
-            <p className="text-slate-400 mt-0.5">
-              FraudResultConsumer reads result. If clean: atomically updates balances, records balanced DEBIT/CREDIT ledger entries, marks status <code className="text-emerald-400">SUCCESS</code>, and fires HMAC-SHA256 signed webhook with exponential backoff retry.
-              If fraud: marks status <code className="text-rose-400">FRAUD_REJECTED</code> and fires Kafka alert to <code className="text-rose-300">fraud.alerts</code>.
-            </p>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {steps.map((s) => (
+            <div key={s.num} className="p-4 rounded-xl border border-slate-100 bg-slate-50/60 space-y-2">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  {s.num}
+                </span>
+                <h4 className="font-semibold text-slate-900 text-xs">{s.title}</h4>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed pl-8">
+                {s.desc}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
