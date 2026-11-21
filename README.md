@@ -1,116 +1,226 @@
-# Distributed Payment Infrastructure — Phase 2: Decoupled Outbox Core
+# Enterprise Distributed Payment Processing Infrastructure
 
-## Overview
-Phase 2 decouples client payment ingestion from background balance mutation and ledger settlement using **Apache Kafka** and the **Transactional Outbox Pattern**. This eliminates the Dual-Write Problem, prevents database connection pool exhaustion, and drops ingestion response latency to sub-20ms.
+A production-grade, polyglot distributed payment processing engine built across 5 architectural phases. Features an edge gateway, transactional outbox pattern, exactly-once event processing (EOS), an asynchronous Python machine learning fraud microservice, adaptive backpressure rate limiting, automated financial reconciliation, reliable HMAC-signed merchant webhooks, and an interactive light-mode React dashboard.
+
+---
+
+## 1. System Topology & Architecture
 
 ```
-[ Client / Web UI ]
-         │
-         │ POST /payments (Header: Idempotency-Key)
-         ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   Payment Service (Spring Boot 3.4.4)                  │
-│                                                                        │
-│   @Transactional:                                                      │
-│     1. SELECT ... FOR UPDATE (Idempotency check)                       │
-│     2. INSERT INTO payments (status = 'PENDING')                       │
-│     3. INSERT INTO outbox_events (status = 'NEW', partition_key=userId)│
-│   COMMIT                                                               │
-│   Return 201 Created (Instant sub-20ms ingestion response!)            │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-              ┌────────────────────┴────────────────────┐
-              │ Background Poller (@Scheduled every 1s) │
-              ▼                                         ▼
-   [ outbox_events Table ]                    [ Apache Kafka 7.5 ]
-   (Mark status = 'PUBLISHED')   ───────────▶ (Topic: payment.created)
-                                                        │
-                                                        ▼
-                                              [ PaymentEventConsumer ]
-                                              (Records ledger entries async)
-                                                        │
-                                                        ▼
-                                            [ Update status = SUCCESS ]
+                       [ React Frontend (:3000) ]
+                                    │
+                                    │ HTTP / Bearer JWT
+                                    ▼
+                ┌───────────────────────────────────────┐
+                │   Spring Cloud Edge Gateway (:8090)   │
+                │  - HS256 Local Token Verification     │
+                │  - Request Enrichment (sub -> User-Id)│
+                │  - Correlation & Trace ID Injection   │
+                └───────────────────┬───────────────────┘
+                                    │
+                       Enriched HTTP│(Internal Network)
+                                    ▼
+                ┌───────────────────────────────────────┐
+                │     Core Payment Service (:8080)      │
+                │  - Atomic Transactional Outbox        │
+                │  - Idempotent Consumer (EOS)          │
+                │  - Double-Entry Accounting Ledger     │
+                │  - Dynamic Rate Limiter & Fallback    │
+                └───────────┬───────────────┬───────────┘
+                            │               │
+       Asynchronous Pub/Sub │               │ Persistent Writes & Caching
+                            ▼               ▼
+        ┌───────────────────────┐       ┌───────────────────────┐
+        │  Apache Kafka (:9092) │       │  PostgreSQL 15 (:5432)│
+        │  - payment.created    │       │  - payments           │
+        │  - fraud.request      │       │  - ledger_entries     │
+        │  - fraud.result       │       │  - outbox_events      │
+        │  - fraud.alerts       │       │  - processed_events   │
+        │  - webhook.DLQ        │       │  - reconciliation     │
+        └───────────┬───────────┘       └───────────────────────┘
+                    │                               │
+       Request-Reply│                  Multi-Layer  │
+          Kafka Pipe│                  Cache & TTL  │
+                    ▼                               ▼
+        ┌───────────────────────┐       ┌───────────────────────┐
+        │ Python Fraud AI(:8000)│       │    Redis 7 (:6380)    │
+        │  - FastAPI + Scikit   │       │  - Layer 1 Idem Cache │
+        │  - Stage 1 Rules      │       │  - Lua Token Bucket   │
+        │  - Stage 2 ML Anomaly │       │  - Sliding Velocity   │
+        └───────────────────────┘       └───────────────────────┘
 ```
 
 ---
 
-## 1. What is Built in Phase 2
+## 2. Microservice Directory Structure
 
-### Infrastructure
-- **Apache Kafka (Confluent 7.5.0) & ZooKeeper**: Running via Docker Compose on port `9092` (host) and `29092` (internal).
-- **PostgreSQL Database (`payments`)**: Local PostgreSQL with schema additions.
-
-### PostgreSQL Database Additions (`schema.sql`)
-- `outbox_events` table:
-  - `id`: UUID (Primary Key)
-  - `event_type`: VARCHAR(100) (`PAYMENT_CREATED`)
-  - `aggregate_id`: VARCHAR(255) (payment ID)
-  - `partition_key`: VARCHAR(255) (`userId` for Kafka partition affinity)
-  - `payload`: TEXT (JSON event payload)
-  - `status`: VARCHAR(50) (`NEW`, `PUBLISHED`, `FAILED`)
-  - `retry_count`: INT (Retry attempts on broker failure)
-  - `trace_id`: VARCHAR(255) (Distributed trace context)
-  - `created_at`, `updated_at`: TIMESTAMP WITH TIME ZONE
-- `payments.status`: Updated to support `PENDING`, `SUCCESS`, and `FAILED`.
-
-### Core Application Services
-- `PaymentService`: Ingests payments synchronously into PostgreSQL (`PENDING` + `OutboxEvent NEW`) within the **same local ACID transaction**, returning `201 Created` instantly.
-- `OutboxPublisherService`: Background scheduler polling up to 50 `NEW` events every second and publishing to Kafka with `userId` partition key.
-- `PaymentEventConsumer`: Kafka listener on `payment.created` with manual acknowledgment (`MANUAL_IMMEDIATE`).
-- `PaymentAsyncSettlementService`: Handles async balance deductions, credits, and double-entry ledger entries in an isolated transaction.
-- `OutboxController`: Endpoint `/outbox` to monitor real-time queue metrics.
-- `SimulationController`: Endpoint `/simulation/consumer-crash` to demonstrate Phase 2 failure modes.
-
----
-
-## 2. Core Concepts Used
-
-1. **The Dual-Write Problem**:
-   - A service cannot write to a database and publish to a message broker in a single atomic operation without slow, fragile two-phase commit (2PC) protocols.
-   - If the DB commit succeeds but Kafka crashes, the event is lost.
-   - If the message is sent to Kafka but the DB commit rolls back, downstream services process a phantom transaction.
-2. **The Transactional Outbox Pattern**:
-   - Solves the dual-write dilemma by storing the message inside an `outbox_events` table within the **same relational database transaction** as the business entity (`Payment`).
-   - The message is guaranteed to persist if and only if the payment persists.
-3. **Kafka Partition Key Affinity**:
-   - The outbox event uses `userId` as the Kafka message key.
-   - Kafka hashes the key to assign the partition:
-     $$\text{Partition} = \text{murmur2}(\text{userId}) \pmod{\text{NumPartitions}}$$
-   - Guarantees all payments for a given user arrive in strict chronological order on the same partition.
-
----
-
-## 3. Failure Scenarios & Why Move to Phase 3?
-
-### Failure Test 1: Simulating Consumer Crash Before Offset Commit
-- When the consumer finishes writing ledger entries to the database, but crashes / throws before calling `ack.acknowledge()`, Kafka assumes message delivery failed.
-- Kafka redelivers the message upon restart.
-- Without an **Idempotent Consumer Deduplication Table** (`processed_events`), the consumer processes the message a second time, writing duplicate `DEBIT` and `CREDIT` entries.
-- **Run the demonstration:**
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\test-phase2-consumer-crash.ps1
-  ```
-- **Result:** Ledger count is 4+ entries instead of 2. Customer was double-debited.
-
-### Kafka Down Survival Test: Zero Payment Loss Guarantee
-- **Run the test:**
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\test-phase2-kafka-down.ps1
-  ```
-- Proves that stopping Kafka during live payment ingestion results in zero lost transactions:
-  1. Payments are accepted with `status = PENDING`.
-  2. Outbox events accumulate safely with `status = NEW`.
-  3. When Kafka restarts, the Outbox Publisher automatically clears the backlog, and the consumer settles all payments to `SUCCESS`.
+```
+DistributedPaymentSystem/
+├── api-gateway/          # Spring Cloud Gateway (Port 8090)
+│   ├── src/main/java/com/payments/gateway/
+│   │   ├── config/       # JWT Token Verification (HS256)
+│   │   ├── controller/   # Auth Controller (POST /auth/token)
+│   │   └── filter/       # RequestEnrichmentFilter & Correlation ID
+│   ├── src/main/resources/application.yml
+│   └── pom.xml
+├── payment-service/      # Core Financial Service (Port 8080)
+│   ├── src/main/java/com/payments/
+│   │   ├── config/       # Database, Redis Lua & WebMvc Configuration
+│   │   ├── controller/   # Payment, Account, Ledger, Simulation Controllers
+│   │   ├── dto/          # Data Transfer Objects & Events
+│   │   ├── entity/       # JPA Entities (Payment, LedgerEntry, OutboxEvent, etc.)
+│   │   ├── repository/   # Spring Data JPA Repositories
+│   │   ├── service/      # Outbox, Settle, RateLimiter, Recon, Webhooks
+│   │   └── util/         # KafkaHeaderUtil (Distributed Tracing Contract)
+│   ├── src/main/resources/schema.sql & application.yml
+│   └── pom.xml
+├── fraud-service/        # Polyglot Python Fraud AI Microservice (Port 8000)
+│   ├── fraud_model.py    # Scikit-Learn IsolationForest Anomaly Scorer
+│   ├── rule_engine.py    # Deterministic Currency, Limit, & Redis Velocity Rules
+│   ├── main.py           # FastAPI Web Application & Confluent Kafka Consumer
+│   └── requirements.txt  # Pinned Python Dependencies
+├── frontend/             # Standalone Light-Mode React Dashboard (Port 3000)
+│   ├── src/
+│   │   ├── components/   # Topology, Terminal, Fraud, Tracing, Backpressure, etc.
+│   │   ├── services/     # Centralized Microservices API Client
+│   │   ├── App.jsx       # Tab Orchestrator & State Management
+│   │   └── index.css     # Clean Tailwind CSS Styles
+│   ├── package.json
+│   └── vite.config.js
+├── scripts/              # Consolidated Verification & Chaos Engineering Scripts
+│   ├── test-all.ps1      # Master Automated Test Suite
+│   └── verify-ledger-invariant.sql
+├── docker-compose.yml    # Kafka, ZooKeeper, Redis
+├── pom.xml               # Multi-Module Parent Aggregator POM
+├── run.bat & run.ps1     # One-Click System Launchers
+└── README.md
+```
 
 ---
 
-## 4. Interactive Web Dashboard
+## 3. Implemented Phases & Core Features
 
-Open your browser at:
-👉 **http://localhost:8080/**
+### Phase 1: Core Transactional Payment Engine
+* **ACID Double-Entry Accounting**: Every settled payment records balanced `DEBIT` and `CREDIT` entries. Verified by invariant query: $\sum \text{DEBIT} = \sum \text{CREDIT} = \text{Amount}$.
+* **Optimistic Concurrency Control**: Uses `@Version` locking to eliminate lost updates on concurrent balance adjustments.
+* **Financial Precision**: Monetary amounts stored as `NUMERIC(19,4)` to prevent IEEE 754 floating-point rounding errors.
 
-- Real-time Outbox Queue counters (`NEW`, `PUBLISHED`, `FAILED`).
-- Ingestion latency metrics (sub-20ms).
-- Live failure test triggers and visual redelivery duplicate demonstration.
-- Instant double-entry ledger audit trail.
+### Phase 2: Transactional Outbox Pattern
+* **Decoupled Ingestion**: Ingests transactions with `POST /payments` and writes both the `Payment` (PENDING) and `OutboxEvent` (NEW) within a **single atomic PostgreSQL transaction**.
+* **Instant Ingestion Response**: Responds with `201 Created` in under 20ms without blocking on external messaging.
+* **At-Least-Once Delivery**: Background `OutboxPublisherService` polls events every second and publishes to Kafka with user partition affinity.
+
+### Phase 3: Exactly-Once Semantics (EOS) & Multi-Layer Caching
+* **Idempotent Consumer**: `processed_events` table with composite primary key `<topic>:<partition>:<eventId>` guarantees duplicate redeliveries become no-ops.
+* **Multi-Layer Cache Defense**: `PaymentCacheService` provides sub-millisecond Layer 1 cached reads for idempotent replays (`idem:<key>`) with a 24-hour TTL, shielding primary storage.
+* **Atomic Rate Limiter & Fallback**: Redis Lua script (`INCR` + `EXPIRE`) token bucket. Gracefully degrades to an in-memory Caffeine cache (50,000 entries, 2-minute TTL) if Redis crashes.
+
+### Phase 4: Polyglot ML Fraud Microservice & Distributed Tracing
+* **Asynchronous Request-Reply over Kafka**: Java produces to `fraud.request`; Python FastAPI worker scores the event and produces to `fraud.result`.
+* **Stage 1 (Deterministic Rules)**:
+  * Currency allowlist check (`USD`, `EUR`, `GBP`, `INR`, `CAD`, `AUD`).
+  * Hard threshold check (amounts $> \$10,000$ automatically rejected).
+  * Sliding-window velocity check: Uses Redis sorted sets to reject users with $>10$ transactions in 60s.
+* **Stage 2 (Machine Learning Inference)**:
+  * Unsupervised `IsolationForest` model evaluates feature vectors (`amount`, `is_high_value`, `currency_risk`). Normalized score $\ge 0.75 \implies \text{FRAUD}$.
+* **Distributed Tracing Contract**: `KafkaHeaderUtil` injects `x-trace-id`, `x-correlation-id`, and `x-event-id` across broker records. SLF4J MDC and Python structured JSON log matching trace identifiers across all 5 hops.
+
+### Phase 5: Edge Gateway, Adaptive Backpressure & Financial Reconciliation
+* **Spring Cloud Edge Gateway**: Validates HS256 JWT tokens with zero database queries. `RequestEnrichmentFilter` extracts claims into `X-User-Id` and `X-Correlation-ID`, strips raw credentials, and handles route circuit-breaking.
+* **Adaptive Backpressure Engine**: Polls Kafka `AdminClient` for consumer group lag. Dynamically throttles `RateLimiterService`:
+  * Lag $< 1,000 \implies$ Normal operation (100% capacity).
+  * Lag $\ge 5,000 \implies$ 50% Throttle reduction (0.50 multiplier).
+  * Lag $\ge 10,000 \implies$ 90% Throttle reduction (0.10 multiplier $\to$ HTTP 429).
+* **Automated Financial Reconciliation Engine**: Runs 5 core invariant audits:
+  1. `STALE_PAYMENT`: Stuck in PENDING $> 10$ minutes.
+  2. `GHOST_PAYMENT`: Outbox event PUBLISHED but missing in payments table.
+  3. `DUPLICATE_LEDGER`: $> 2$ ledger entries for a single transaction.
+  4. `LEDGER_IMBALANCE`: $\sum \text{DEBIT} \ne \sum \text{CREDIT}$.
+  5. `ORPHAN_LEDGER`: Ledger entries pointing to non-existent payment records.
+  Publishes alerts to `reconciliation.alerts` and PostgreSQL table `reconciliation_alerts`.
+* **Reliable Webhooks**: Computes HMAC-SHA256 signatures (`X-Signature`), executes exponential backoff retry scheduling (5s, 30s, 2m, 10m, 30m), and routes failed deliveries to `webhook.DLQ`.
+
+---
+
+## 4. Quick Start & Execution
+
+### Prerequisites
+* **Java 17+** (JDK 17)
+* **Node.js 20+** & npm
+* **Python 3.11+**
+* **Docker & Docker Compose**
+* **PostgreSQL 15** running locally on port `5432`
+
+### One-Click Launch
+Run the automated launcher script (starts Docker, builds Java modules, starts Python AI, Payment Core, Gateway, and React Frontend):
+
+```powershell
+# In PowerShell:
+.\run.ps1
+
+# Or in Windows CMD:
+run.bat
+```
+
+### Manual Individual Startup
+1. **Start Docker Containers**:
+   ```bash
+   docker compose up -d
+   ```
+2. **Build Multi-Module Java Services**:
+   ```bash
+   ./mvnw clean package -DskipTests
+   ```
+3. **Start Python Fraud Service**:
+   ```bash
+   cd fraud-service
+   pip install -r requirements.txt
+   python -m uvicorn main:app --host 0.0.0.0 --port 8000
+   ```
+4. **Start Core Payment Service**:
+   ```bash
+   java -jar payment-service/target/payment-service-1.0.0-SNAPSHOT.jar
+   ```
+5. **Start Edge API Gateway**:
+   ```bash
+   java -jar api-gateway/target/api-gateway-1.0.0-SNAPSHOT.jar
+   ```
+6. **Start React Frontend Dashboard**:
+   ```bash
+   cd frontend
+   npm install
+   npm run dev -- --port 3000 --host
+   ```
+
+---
+
+## 5. Live Service Endpoints
+
+| Service | Port | Endpoint URL | Description |
+| :--- | :--- | :--- | :--- |
+| **React Frontend** | `3000` | [http://localhost:3000](http://localhost:3000) | Light-mode management & testing dashboard |
+| **Edge API Gateway** | `8090` | [http://localhost:8090](http://localhost:8090) | Central reverse proxy & JWT authenticator |
+| **Gateway Health** | `8090` | `GET /actuator/health` | Health endpoint |
+| **Gateway Metrics** | `8090` | `GET /actuator/prometheus` | Prometheus scraper endpoint |
+| **Core Payment Service**| `8080` | [http://localhost:8080](http://localhost:8080) | Financial processing engine |
+| **Payment Metrics** | `8080` | `GET /actuator/prometheus` | Prometheus scraper endpoint |
+| **Python Fraud AI** | `8000` | [http://localhost:8000/health](http://localhost:8000/health) | FastAPI health check |
+| **ML Inference Endpoint** | `8000` | `POST /score` | Direct IsolationForest ML inference |
+
+---
+
+## 6. Running the Verification Test Suite
+
+Run the master automated verification script:
+
+```powershell
+powershell -File scripts/test-all.ps1
+```
+
+**Output Verification Checklist:**
+* [x] Edge Gateway JWT token minting & validation.
+* [x] Ingestion responds with `201 PENDING` in $< 20\text{ms}$.
+* [x] Asynchronous settlement confirms `SUCCESS` after ML screening.
+* [x] High-velocity fraud attack (15 requests $\to$ 10 pass, 5 rejected by Redis sliding-window).
+* [x] Financial reconciliation validates 0 imbalances and 0 duplicate entries.
+* [x] Double-entry ledger invariant verified ($\sum \text{DEBIT} = \sum \text{CREDIT}$).
