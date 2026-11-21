@@ -37,6 +37,8 @@ echo.
 echo ==========================================================
 echo    ALL SERVICES STARTED SUCCESSFULLY!
 echo    - React Frontend:    http://localhost:3000
+echo    - Grafana Metrics:   http://localhost:3001 (admin/admin)
+echo    - Prometheus UI:     http://localhost:9090
 echo    - Edge API Gateway:  http://localhost:8090
 echo    - Payment Service:   http://localhost:8080
 echo    - Python Fraud AI:   http://localhost:8000

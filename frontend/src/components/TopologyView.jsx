@@ -1,5 +1,5 @@
 import React from 'react';
-import { Network, CheckCircle2, ArrowRight, Zap, Shield, Database, Server, Cpu, Box } from 'lucide-react';
+import { Network, CheckCircle2, ArrowRight, Zap, Shield, Database, Server, Cpu, Box, ExternalLink } from 'lucide-react';
 
 export default function TopologyView({ health }) {
   const nodes = [
@@ -10,6 +10,8 @@ export default function TopologyView({ health }) {
       role: 'Reverse Proxy & JWT Auth',
       color: 'border-blue-200 bg-blue-50/50 text-blue-800',
       status: health?.gateway?.status || 'UP',
+      url: 'http://localhost:8090/actuator/health',
+      linkLabel: 'Health Endpoint',
       details: 'HS256 Token Verify • Request Enrichment (X-User-Id, X-Correlation-ID) • Circuit Breaker'
     },
     {
@@ -19,6 +21,8 @@ export default function TopologyView({ health }) {
       role: 'Financial Transaction Engine',
       color: 'border-indigo-200 bg-indigo-50/50 text-indigo-800',
       status: health?.payment?.status || 'UP',
+      url: 'http://localhost:8080/actuator/health',
+      linkLabel: 'Health Endpoint',
       details: 'Transactional Outbox • Double-Entry Ledger • Idempotent Consumer (processed_events)'
     },
     {
@@ -28,6 +32,8 @@ export default function TopologyView({ health }) {
       role: 'Deterministic Rules & ML',
       color: 'border-purple-200 bg-purple-50/50 text-purple-800',
       status: health?.fraud?.status || 'UP',
+      url: 'http://localhost:8000/docs',
+      linkLabel: 'FastAPI Swagger Docs',
       details: 'Stage 1 Rules (Redis Velocity, $10k Limit) • Stage 2 IsolationForest ML Anomaly Scoring'
     },
     {
@@ -56,6 +62,28 @@ export default function TopologyView({ health }) {
       color: 'border-emerald-200 bg-emerald-50/50 text-emerald-800',
       status: 'UP',
       details: 'Double-entry Invariant: SUM(DEBIT) = SUM(CREDIT) • @Version Optimistic Locks • NUMERIC(19,4)'
+    },
+    {
+      id: 'prometheus',
+      title: 'Prometheus TSDB Scraper',
+      subtitle: 'Time-Series DB • Port 9090',
+      role: 'Metrics Collector',
+      color: 'border-amber-200 bg-amber-50/50 text-amber-800',
+      status: 'UP',
+      url: 'http://localhost:9090/targets',
+      linkLabel: 'Open Prometheus UI',
+      details: 'Scrapes /actuator/prometheus every 10s • Host & Container targets • http://localhost:9090'
+    },
+    {
+      id: 'grafana',
+      title: 'Grafana Observability',
+      subtitle: 'Dashboard UI • Port 3001',
+      role: 'Production Visualizer',
+      color: 'border-orange-200 bg-orange-50/50 text-orange-800',
+      status: 'UP',
+      url: 'http://localhost:3001/d/payments-overview/payments-system-overview',
+      linkLabel: 'Open Grafana Dashboard',
+      details: 'Pre-provisioned payment-service-dashboard.json • Port 3001 • Credentials: admin / admin'
     }
   ];
 
@@ -96,31 +124,66 @@ export default function TopologyView({ health }) {
               Multi-language distributed system architecture with asynchronous event-driven messaging
             </p>
           </div>
-          <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200">
-            <CheckCircle2 className="w-3.5 h-3.5" /> All Microservices Connected & Healthy
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href="http://localhost:3001/d/payments-overview/payments-system-overview"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-orange-50 text-orange-700 text-xs font-medium border border-orange-200 hover:bg-orange-100 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Grafana (:3001)
+            </a>
+            <a
+              href="http://localhost:9090/targets"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-medium border border-amber-200 hover:bg-amber-100 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Prometheus (:9090)
+            </a>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5" /> All Services Healthy
+            </span>
+          </div>
         </div>
 
         {/* Nodes Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {nodes.map((node) => (
-            <div key={node.id} className="border border-slate-200 rounded-xl p-4 bg-white hover:border-slate-300 transition-all shadow-xs">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-wider font-semibold text-slate-400">
-                    {node.role}
+            <div key={node.id} className="border border-slate-200 rounded-xl p-4 bg-white hover:border-slate-300 transition-all shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-wider font-semibold text-slate-400">
+                      {node.role}
+                    </span>
+                    <h3 className="font-semibold text-slate-900 text-sm mt-0.5">{node.title}</h3>
+                    <p className="text-xs text-slate-500 font-mono mt-0.5">{node.subtitle}</p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    UP
                   </span>
-                  <h3 className="font-semibold text-slate-900 text-sm mt-0.5">{node.title}</h3>
-                  <p className="text-xs text-slate-500 font-mono mt-0.5">{node.subtitle}</p>
                 </div>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  UP
-                </span>
+                <p className="text-xs text-slate-600 font-mono mt-3 pt-3 border-t border-slate-100 leading-relaxed">
+                  {node.details}
+                </p>
               </div>
-              <p className="text-xs text-slate-600 font-mono mt-3 pt-3 border-t border-slate-100 leading-relaxed">
-                {node.details}
-              </p>
+              {node.url && (
+                <div className="mt-3 pt-2">
+                  <a
+                    href={node.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                  >
+                    <span>{node.linkLabel || 'Open Link'}</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
             </div>
           ))}
         </div>

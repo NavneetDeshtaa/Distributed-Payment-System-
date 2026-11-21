@@ -37,6 +37,8 @@ Start-Process -NoNewWindow powershell -ArgumentList "-Command cd frontend; npx v
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "   ALL SERVICES STARTED SUCCESSFULLY!                     " -ForegroundColor Green
 Write-Host "   - React Frontend:    http://localhost:3000              " -ForegroundColor Green
+Write-Host "   - Grafana Metrics:   http://localhost:3001 (admin/admin)" -ForegroundColor Green
+Write-Host "   - Prometheus UI:     http://localhost:9090              " -ForegroundColor Green
 Write-Host "   - Edge API Gateway:  http://localhost:8090              " -ForegroundColor Green
 Write-Host "   - Payment Service:   http://localhost:8080              " -ForegroundColor Green
 Write-Host "   - Python Fraud AI:   http://localhost:8000              " -ForegroundColor Green

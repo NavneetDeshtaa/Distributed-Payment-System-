@@ -199,6 +199,8 @@ run.bat
 | Service | Port | Endpoint URL | Description |
 | :--- | :--- | :--- | :--- |
 | **React Frontend** | `3000` | [http://localhost:3000](http://localhost:3000) | Light-mode management & testing dashboard |
+| **Grafana Monitoring** | `3001` | [http://localhost:3001](http://localhost:3001) | Grafana Dashboard (User: `admin`, Pass: `admin`) |
+| **Prometheus Scraper** | `9090` | [http://localhost:9090](http://localhost:9090) | Prometheus UI & TSDB metrics browser |
 | **Edge API Gateway** | `8090` | [http://localhost:8090](http://localhost:8090) | Central reverse proxy & JWT authenticator |
 | **Gateway Health** | `8090` | `GET /actuator/health` | Health endpoint |
 | **Gateway Metrics** | `8090` | `GET /actuator/prometheus` | Prometheus scraper endpoint |
