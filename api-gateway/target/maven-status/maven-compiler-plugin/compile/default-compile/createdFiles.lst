@@ -1,0 +1,5 @@
+com\payments\gateway\ApiGatewayApplication.class
+com\payments\gateway\config\JwtUtil.class
+com\payments\gateway\controller\AuthController.class
+com\payments\gateway\filter\RequestEnrichmentFilter.class
+com\payments\gateway\controller\FallbackController.class

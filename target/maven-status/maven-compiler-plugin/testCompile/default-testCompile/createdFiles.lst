@@ -1,0 +1,7 @@
+com\payments\LedgerInvariantTest.class
+com\payments\PaymentConcurrencyIntegrationTest.class
+com\payments\IdempotentConsumerIntegrationTest.class
+com\payments\PaymentCacheServiceTest.class
+com\payments\OutboxPatternIntegrationTest.class
+com\payments\RateLimiterServiceTest.class
+com\payments\AccountOptimisticLockTest.class

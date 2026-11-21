@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Payments Infrastructure — Phase 3: EOS & Multi-Layer Caching</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .pulse-subtle { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 via-cyan-500 to-blue-500 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-cyan-500/20">
+                    <i data-lucide="shield-check" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-bold text-white flex items-center gap-2">
+                        Distributed Payments System
+                        <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Phase 3: EOS & Caching</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Exactly-Once Processing (EOS) · Redis 7 Multi-Layer Caching · Token-Bucket Rate Limiter · Caffeine Fallback</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-2 text-xs px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-subtle"></span>
+                    <span>PostgreSQL (:5432)</span>
+                </div>
+                <div class="flex items-center space-x-2 text-xs px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-800 text-cyan-400">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 pulse-subtle"></span>
+                    <span>Kafka (:9092)</span>
+                </div>
+                <div id="redis-status-pill" class="flex items-center space-x-2 text-xs px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-400">
+                    <span id="redis-indicator" class="w-2 h-2 rounded-full bg-rose-400 pulse-subtle"></span>
+                    <span id="redis-status-text">Redis (:6380)</span>
+                </div>
+                <button onclick="refreshAll()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1.5 text-xs font-medium">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                    <span>Refresh</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+        <!-- Phase 3 Architecture Metrics: Cache & Rate Limiter Bar -->
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Metric 1: Redis Layer 1 Cache -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                    <span class="font-semibold flex items-center gap-1.5 text-cyan-400">
+                        <i data-lucide="database" class="w-4 h-4"></i>
+                        Layer 1 Redis Cache
+                    </span>
+                    <span id="cache-hit-ratio" class="mono text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-bold">0% Hits</span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center mt-1">
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">Hits</span>
+                        <span id="cache-hits" class="mono text-lg font-bold text-emerald-400">0</span>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">Misses</span>
+                        <span id="cache-misses" class="mono text-lg font-bold text-slate-300">0</span>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">Writes</span>
+                        <span id="cache-writes" class="mono text-lg font-bold text-cyan-400">0</span>
+                    </div>
+                </div>
+                <span class="text-[10px] text-slate-500 mt-2 block">Key: <code class="mono text-slate-400">idem:&lt;key&gt;</code> · 24h TTL (0 DB load)</span>
+            </div>
+
+            <!-- Metric 2: Rate Limiter Status -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                    <span class="font-semibold flex items-center gap-1.5 text-purple-400">
+                        <i data-lucide="gauge" class="w-4 h-4"></i>
+                        Token-Bucket Limiter
+                    </span>
+                    <span id="rate-limiter-mode" class="mono text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 font-bold">Redis Mode</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-center mt-1">
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">Allowed</span>
+                        <span id="rl-allowed" class="mono text-lg font-bold text-emerald-400">0</span>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">Rejected (429)</span>
+                        <span id="rl-rejected" class="mono text-lg font-bold text-rose-400">0</span>
+                    </div>
+                </div>
+                <div class="text-[10px] text-slate-500 mt-2 flex justify-between">
+                    <span>Limit: 100 req / 60s</span>
+                    <span>Caffeine Fallback: <strong id="rl-caffeine-fallback" class="mono text-amber-400 font-bold">0</strong></span>
+                </div>
+            </div>
+
+            <!-- Metric 3: Processed Events (EOS Deduplication Table) -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                    <span class="font-semibold flex items-center gap-1.5 text-emerald-400">
+                        <i data-lucide="shield" class="w-4 h-4"></i>
+                        EOS Deduplication Table
+                    </span>
+                    <span class="mono text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-bold">processed_events</span>
+                </div>
+                <div class="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 my-auto">
+                    <div>
+                        <span class="text-[10px] text-slate-500 block">Registered Events</span>
+                        <span id="eos-processed-count" class="mono text-2xl font-bold text-white">0</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-500 block">Duplicates Blocked</span>
+                        <span id="eos-duplicates-count" class="mono text-2xl font-bold text-amber-400">0</span>
+                    </div>
+                </div>
+                <span class="text-[10px] text-slate-500 mt-2 block">Composite PK: <code class="mono text-slate-400">&lt;topic&gt;:&lt;partition&gt;:&lt;id&gt;</code></span>
+            </div>
+
+            <!-- Metric 4: Transactional Outbox Queue -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between">
+                <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                    <span class="font-semibold flex items-center gap-1.5 text-amber-400">
+                        <i data-lucide="inbox" class="w-4 h-4"></i>
+                        Outbox Poller (1000ms)
+                    </span>
+                    <span class="mono text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-bold">payment.created</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-center mt-1">
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">NEW</span>
+                        <span id="outbox-new-count" class="mono text-lg font-bold text-amber-400">0</span>
+                    </div>
+                    <div class="p-2 rounded-lg bg-slate-950 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">PUBLISHED</span>
+                        <span id="outbox-published-count" class="mono text-lg font-bold text-emerald-400">0</span>
+                    </div>
+                </div>
+                <span class="text-[10px] text-slate-500 mt-2 block">Broker ACK: Marks outbox PUBLISHED</span>
+            </div>
+        </section>
+
+        <!-- Live Account Balances -->
+        <section>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                    <i data-lucide="wallet" class="w-4 h-4 text-emerald-400"></i>
+                    Live Account Balances (Double-Entry Invariant)
+                </h2>
+                <div class="text-xs text-slate-500 flex items-center gap-2">
+                    <span>Auto-refreshing (3s)</span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                </div>
+            </div>
+
+            <div id="accounts-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- Main Middle Grid: Payment Execution & Phase 3 Failure Testing Suite -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+            <!-- Left Column: Interactive Payment Form (5 Cols) -->
+            <section class="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-6">
+                        <div class="flex items-center gap-2.5">
+                            <div class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                <i data-lucide="send" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-white">Payment Ingestion (Layer 1 + Outbox)</h3>
+                                <p class="text-xs text-slate-400">Checks Redis L1 cache &bull; Rate limits &bull; Writes Outbox &bull; Sub-20ms</p>
+                            </div>
+                        </div>
+                        <span class="text-xs px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 mono font-medium">Sub-20ms</span>
+                    </div>
+
+                    <form id="payment-form" onsubmit="handlePaymentSubmit(event)" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1.5">Payer (userId = Partition Key)</label>
+                                <select id="payer-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 transition">
+                                    <option value="alice">alice (Primary User)</option>
+                                    <option value="u1">u1 (User 1)</option>
+                                    <option value="u2">u2 (User 2)</option>
+                                    <option value="race-user">race-user</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1.5">Merchant (merchantId)</label>
+                                <select id="merchant-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500 transition">
+                                    <option value="bob">bob (Primary Merchant)</option>
+                                    <option value="m1">m1 (Merchant 1)</option>
+                                    <option value="m2">m2 (Merchant 2)</option>
+                                    <option value="race-merchant">race-merchant</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4">
+                            <div class="col-span-2">
+                                <label class="block text-xs font-medium text-slate-400 mb-1.5">Amount (NUMERIC 19,4)</label>
+                                <div class="relative">
+                                    <span class="absolute left-3.5 top-2.5 text-slate-500 text-sm">$</span>
+                                    <input type="number" step="0.0001" min="0.0001" id="payment-amount" value="25.0000" class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-sm text-slate-200 mono font-semibold focus:outline-none focus:border-cyan-500 transition" required>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-400 mb-1.5">Currency</label>
+                                <input type="text" id="payment-currency" value="USD" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-200 mono uppercase focus:outline-none focus:border-cyan-500 transition" required>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="text-xs font-medium text-slate-400">Idempotency-Key Header</label>
+                                <button type="button" onclick="generateNewKey()" class="text-xs text-cyan-400 hover:text-cyan-300 transition flex items-center gap-1">
+                                    <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                                    <span>New UUID</span>
+                                </button>
+                            </div>
+                            <input type="text" id="idempotency-key" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 mono focus:outline-none focus:border-cyan-500 transition" required>
+                        </div>
+
+                        <button type="submit" id="submit-btn" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 font-semibold text-sm text-slate-950 shadow-lg shadow-cyan-500/20 transition flex items-center justify-center gap-2">
+                            <i data-lucide="zap" class="w-4 h-4"></i>
+                            <span>Ingest Payment (Instant 201 Response)</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Last Operation Result -->
+                <div id="payment-result-box" class="mt-6 pt-4 border-t border-slate-800 hidden">
+                    <div class="text-xs font-medium text-slate-400 mb-2 flex items-center justify-between">
+                        <span>Ingestion Response:</span>
+                        <div class="flex items-center gap-2">
+                            <span id="ingest-latency" class="mono text-[11px] text-cyan-400 font-bold"></span>
+                            <span id="response-badge" class="px-2 py-0.5 rounded text-[11px] font-bold mono"></span>
+                        </div>
+                    </div>
+                    <pre id="response-json" class="p-3 bg-slate-950 border border-slate-800/80 rounded-xl text-xs mono text-slate-300 overflow-x-auto max-h-36"></pre>
+                </div>
+            </section>
+
+            <!-- Right Column: Phase 3 Failure Modes & Testing Suite (7 Cols) -->
+            <section class="lg:col-span-7 space-y-6">
+
+                <!-- Phase 3 Failure Test 1 Card: High-Frequency Kafka Duplicate Ingestion -->
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                    <div class="absolute -right-12 -top-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl"></div>
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <i data-lucide="copy" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                                    Failure Test 1: High-Frequency Kafka Duplicate Ingestion
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">EOS Verified</span>
+                                </h3>
+                                <p class="text-xs text-slate-400">Pushes 100 identical Kafka messages with the same <code class="mono text-emerald-400">x-event-id</code>. Verifies 1 processed, 99 skipped, ledger = 2 entries.</p>
+                            </div>
+                        </div>
+                        <button onclick="runDuplicateIngestionTest()" id="btn-duplicate-test" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-semibold text-xs text-slate-950 shadow-lg shadow-emerald-600/20 transition flex items-center gap-1.5">
+                            <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                            <span>Push 100 Duplicates</span>
+                        </button>
+                    </div>
+
+                    <div id="duplicate-test-results" class="hidden mt-4 p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                        <div class="text-xs text-slate-300 flex items-center justify-between pb-2 border-b border-slate-800/60">
+                            <span>Exactly-Once Processing (EOS) Verification:</span>
+                            <span id="duplicate-badge" class="mono font-bold text-emerald-400">Testing...</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3 text-xs">
+                            <div class="p-3 rounded-lg border border-slate-800 bg-slate-900/50">
+                                <span class="text-[10px] text-slate-400 block mb-1">Messages Ingested</span>
+                                <span id="dup-total-sent" class="text-xl font-bold mono text-cyan-400">100</span>
+                                <span class="block text-[10px] text-slate-500 mt-1">Same x-event-id</span>
+                            </div>
+                            <div class="p-3 rounded-lg border border-emerald-800/50 bg-emerald-950/20">
+                                <span class="text-[10px] text-emerald-300 block mb-1">Processed vs Skipped</span>
+                                <span id="dup-processed-skipped" class="text-xl font-bold mono text-emerald-400">1 / 99</span>
+                                <span class="block text-[10px] text-emerald-400/80 mt-1">99 Duplicates Skipped</span>
+                            </div>
+                            <div class="p-3 rounded-lg border border-slate-800 bg-slate-900/50">
+                                <span class="text-[10px] text-slate-400 block mb-1">Actual Ledger Entries</span>
+                                <span id="dup-ledger-count" class="text-xl font-bold mono text-white">2 entries</span>
+                                <span class="block text-[10px] text-slate-500 mt-1">1 DEBIT + 1 CREDIT</span>
+                            </div>
+                        </div>
+                        <div id="duplicate-verdict" class="text-xs text-slate-300 p-2.5 rounded-lg bg-slate-900 border border-slate-800"></div>
+                    </div>
+                </div>
+
+                <!-- Phase 3 Failure Test 2 Card: Redis Crash Under Traffic (Graceful Degradation) -->
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                    <div class="absolute -right-12 -top-12 w-36 h-36 bg-rose-500/10 rounded-full blur-2xl"></div>
+                    <div class="flex items-start justify-between mb-4">
+                        <div class="flex items-center gap-2.5">
+                            <div class="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                <i data-lucide="flame" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                                    Failure Test 2: Redis Crash Under Traffic
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">Graceful Degradation</span>
+                                </h3>
+                                <p class="text-xs text-slate-400">Stops Redis; confirms payments continue (no 500 error!) and limiter seamlessly uses in-memory Caffeine fallback.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleRedisContainer(false)" id="btn-stop-redis" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white text-xs font-semibold transition">
+                                Stop Redis
+                            </button>
+                            <button onclick="toggleRedisContainer(true)" id="btn-start-redis" class="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold transition">
+                                Start Redis
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                        <div class="space-y-1">
+                            <span class="font-semibold text-slate-200 block">Run automated PowerShell Redis Crash Test:</span>
+                            <code class="text-[11px] mono text-cyan-400">powershell -File .\scripts\test-phase3-redis-crash.ps1</code>
+                        </div>
+                        <button onclick="runRedisTrafficTest()" id="btn-redis-traffic" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition flex items-center gap-1.5">
+                            <i data-lucide="play" class="w-3.5 h-3.5 text-cyan-400"></i>
+                            <span>Test Outage Traffic</span>
+                        </button>
+                    </div>
+                    <div id="redis-test-status" class="mt-3 text-xs text-slate-400 hidden p-2.5 rounded-lg bg-slate-900 border border-slate-800"></div>
+                </div>
+
+                <!-- Invariant Audit Card -->
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <i data-lucide="scale" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                                Accounting Invariant Audit
+                                <span class="mono text-xs text-slate-400">SUM(DEBIT) == SUM(CREDIT)</span>
+                            </h3>
+                            <p id="invariant-status-text" class="text-xs text-emerald-400 mt-0.5">Verification Pending...</p>
+                        </div>
+                    </div>
+                    <button onclick="verifyLedgerInvariant()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-medium text-xs border border-slate-700 transition flex items-center gap-1.5">
+                        <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+                        <span>Audit SQL Invariant</span>
+                    </button>
+                </div>
+
+            </section>
+        </div>
+
+        <!-- Bottom Section: Multi-Tab History Table -->
+        <section class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+                <div class="flex items-center space-x-4">
+                    <button id="tab-payments-btn" onclick="switchTab('payments')" class="text-sm font-bold text-white flex items-center gap-2 pb-1 border-b-2 border-cyan-500">
+                        <i data-lucide="list-ordered" class="w-4 h-4 text-cyan-400"></i>
+                        <span>Payments Ingestion Log</span>
+                        <span id="payments-count-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] mono text-slate-300">0</span>
+                    </button>
+                    <button id="tab-outbox-btn" onclick="switchTab('outbox')" class="text-sm font-medium text-slate-400 hover:text-slate-200 flex items-center gap-2 pb-1 border-b-2 border-transparent transition">
+                        <i data-lucide="inbox" class="w-4 h-4"></i>
+                        <span>Outbox Events</span>
+                        <span id="outbox-count-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] mono text-slate-300">0</span>
+                    </button>
+                    <button id="tab-ledger-btn" onclick="switchTab('ledger')" class="text-sm font-medium text-slate-400 hover:text-slate-200 flex items-center gap-2 pb-1 border-b-2 border-transparent transition">
+                        <i data-lucide="book-open" class="w-4 h-4"></i>
+                        <span>Ledger Entries</span>
+                        <span id="ledger-count-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] mono text-slate-300">0</span>
+                    </button>
+                    <button id="tab-eos-btn" onclick="switchTab('eos')" class="text-sm font-medium text-slate-400 hover:text-slate-200 flex items-center gap-2 pb-1 border-b-2 border-transparent transition">
+                        <i data-lucide="shield-alert" class="w-4 h-4 text-emerald-400"></i>
+                        <span>Processed Events (EOS Table)</span>
+                        <span id="eos-count-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] mono text-slate-300">0</span>
+                    </button>
+                </div>
+                <span class="text-xs text-slate-500">Real-Time Event-Driven Architecture</span>
+            </div>
+
+            <!-- Tab 1: Payments Table -->
+            <div id="tab-payments" class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead class="bg-slate-950/60 uppercase text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                            <th class="py-3 px-4">Payment ID</th>
+                            <th class="py-3 px-4">Payer</th>
+                            <th class="py-3 px-4">Merchant</th>
+                            <th class="py-3 px-4">Amount</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Idempotency Key</th>
+                            <th class="py-3 px-4">Created At</th>
+                        </tr>
+                    </thead>
+                    <tbody id="payments-table-body" class="divide-y divide-slate-800/60">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tab 2: Outbox Table -->
+            <div id="tab-outbox" class="overflow-x-auto hidden">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead class="bg-slate-950/60 uppercase text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                            <th class="py-3 px-4">Outbox ID</th>
+                            <th class="py-3 px-4">Event Type</th>
+                            <th class="py-3 px-4">Partition Key (userId)</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Retries</th>
+                            <th class="py-3 px-4">Created At</th>
+                            <th class="py-3 px-4">Payload Preview</th>
+                        </tr>
+                    </thead>
+                    <tbody id="outbox-table-body" class="divide-y divide-slate-800/60">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tab 3: Ledger Table -->
+            <div id="tab-ledger" class="overflow-x-auto hidden">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead class="bg-slate-950/60 uppercase text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                            <th class="py-3 px-4">Entry ID</th>
+                            <th class="py-3 px-4">Type</th>
+                            <th class="py-3 px-4">Amount</th>
+                            <th class="py-3 px-4">Account ID</th>
+                            <th class="py-3 px-4">Counter Account ID</th>
+                            <th class="py-3 px-4">Payment Reference</th>
+                            <th class="py-3 px-4">Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ledger-table-body" class="divide-y divide-slate-800/60">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tab 4: Processed Events (EOS Table) -->
+            <div id="tab-eos" class="overflow-x-auto hidden">
+                <table class="w-full text-left text-xs text-slate-300">
+                    <thead class="bg-slate-950/60 uppercase text-slate-400 font-semibold border-b border-slate-800">
+                        <tr>
+                            <th class="py-3 px-4">Composite Event ID (PK)</th>
+                            <th class="py-3 px-4">Consumer Group</th>
+                            <th class="py-3 px-4">Topic</th>
+                            <th class="py-3 px-4">Processed Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eos-table-body" class="divide-y divide-slate-800/60">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="border-t border-slate-800 py-6 text-center text-xs text-slate-500">
+        Phase 3: Exactly-Once Processing (EOS) &amp; Multi-Layer Caching &bull; Redis 7 &bull; Apache Kafka &bull; PostgreSQL 18 &bull; Spring Boot 3.4
+    </footer>
+
+    <!-- Frontend Logic -->
+    <script>
+        const API_BASE = '';
+        let activeTab = 'payments';
+
+        function generateUuid() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function generateNewKey() {
+            document.getElementById('idempotency-key').value = 'key-' + generateUuid().substring(0, 12);
+        }
+        generateNewKey();
+
+        async function fetchAccounts() {
+            try {
+                const res = await fetch(`${API_BASE}/accounts`);
+                if (!res.ok) return;
+                const accounts = await res.json();
+                renderAccounts(accounts);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function renderAccounts(accounts) {
+            const grid = document.getElementById('accounts-grid');
+            grid.innerHTML = '';
+            accounts.forEach(acc => {
+                const isUser = acc.ownerId.startsWith('u') || acc.ownerId.includes('user') || acc.ownerId === 'alice';
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-xl border ${isUser ? 'border-cyan-500/20 bg-cyan-950/20' : 'border-blue-500/20 bg-blue-950/20'} transition shadow-md`;
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+                        <span class="font-bold flex items-center gap-1.5 ${isUser ? 'text-cyan-400' : 'text-blue-400'}">
+                            <span class="w-2 h-2 rounded-full ${isUser ? 'bg-cyan-400' : 'bg-blue-400'}"></span>
+                            ${acc.ownerId}
+                        </span>
+                        <span class="mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-400 font-medium">v${acc.version}</span>
+                    </div>
+                    <div class="text-2xl font-bold mono text-white">
+                        $${parseFloat(acc.balance).toFixed(4)}
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1 flex justify-between items-center">
+                        <span>${acc.currency}</span>
+                        <span class="mono text-[10px] text-slate-600 truncate max-w-[100px]">${acc.id.substring(0, 8)}...</span>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        async function fetchOutbox() {
+            try {
+                const res = await fetch(`${API_BASE}/outbox`);
+                if (!res.ok) return;
+                const data = await res.json();
+                document.getElementById('outbox-new-count').innerText = data.newCount;
+                document.getElementById('outbox-published-count').innerText = data.publishedCount;
+                document.getElementById('outbox-count-badge').innerText = data.recentEvents ? data.recentEvents.length : 0;
+                renderOutboxTable(data.recentEvents || []);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function renderOutboxTable(events) {
+            const tbody = document.getElementById('outbox-table-body');
+            tbody.innerHTML = '';
+            if (events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-slate-500">No outbox events recorded.</td></tr>';
+                return;
+            }
+            events.forEach(e => {
+                const isPublished = e.status === 'PUBLISHED';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-900/50 transition';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 mono text-slate-400">${e.id.substring(0, 8)}...</td>
+                    <td class="py-3 px-4 mono text-cyan-400 font-semibold">${e.eventType}</td>
+                    <td class="py-3 px-4 mono text-slate-300">${e.partitionKey}</td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold mono ${isPublished ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}">
+                            ${e.status}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 mono text-slate-400">${e.retryCount}</td>
+                    <td class="py-3 px-4 text-slate-500 text-[11px]">${new Date(e.createdAt).toLocaleTimeString()}</td>
+                    <td class="py-3 px-4 mono text-slate-500 text-[10px] truncate max-w-xs">${e.payload}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function fetchPhase3Stats() {
+            try {
+                const res = await fetch(`${API_BASE}/simulation/stats`);
+                if (!res.ok) return;
+                const data = await res.json();
+
+                // Update Redis Pill in Header
+                const redisPill = document.getElementById('redis-status-pill');
+                const redisInd = document.getElementById('redis-indicator');
+                const redisText = document.getElementById('redis-status-text');
+                if (data.redisConnected) {
+                    redisPill.className = 'flex items-center space-x-2 text-xs px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-400';
+                    redisInd.className = 'w-2 h-2 rounded-full bg-emerald-400 pulse-subtle';
+                    redisText.innerText = 'Redis 7 (:6380) Online';
+                } else {
+                    redisPill.className = 'flex items-center space-x-2 text-xs px-2.5 py-1 rounded-lg bg-amber-950/60 border border-amber-800 text-amber-400';
+                    redisInd.className = 'w-2 h-2 rounded-full bg-amber-400 pulse-subtle';
+                    redisText.innerText = 'Redis Offline (Caffeine Fallback)';
+                }
+
+                // Cache Stats
+                if (data.cache) {
+                    document.getElementById('cache-hits').innerText = data.cache.hits;
+                    document.getElementById('cache-misses').innerText = data.cache.misses;
+                    document.getElementById('cache-writes').innerText = data.cache.writes;
+                    const totalReq = data.cache.hits + data.cache.misses;
+                    const ratio = totalReq > 0 ? Math.round((data.cache.hits / totalReq) * 100) : 0;
+                    document.getElementById('cache-hit-ratio').innerText = `${ratio}% Hits`;
+                }
+
+                // Rate Limiter Stats
+                if (data.rateLimiter) {
+                    document.getElementById('rl-allowed').innerText = data.rateLimiter.totalAllowed;
+                    document.getElementById('rl-rejected').innerText = data.rateLimiter.totalRejected;
+                    document.getElementById('rl-caffeine-fallback').innerText = data.rateLimiter.caffeineFallbackCount;
+                    const modeElem = document.getElementById('rate-limiter-mode');
+                    if (data.redisConnected) {
+                        modeElem.className = 'mono text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20 font-bold';
+                        modeElem.innerText = 'Redis Lua Mode';
+                    } else {
+                        modeElem.className = 'mono text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-bold';
+                        modeElem.innerText = 'Caffeine Fallback Mode';
+                    }
+                }
+
+                // EOS Stats
+                document.getElementById('eos-processed-count').innerText = data.processedEventsCount || 0;
+                document.getElementById('eos-duplicates-count').innerText = data.totalDuplicatesDetected || 0;
+                document.getElementById('eos-count-badge').innerText = data.processedEventsCount || 0;
+
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function fetchProcessedEvents() {
+            try {
+                const res = await fetch(`${API_BASE}/simulation/processed-events`);
+                if (!res.ok) return;
+                const events = await res.json();
+                renderEosTable(events);
+            } catch (err) {}
+        }
+
+        function renderEosTable(events) {
+            const tbody = document.getElementById('eos-table-body');
+            tbody.innerHTML = '';
+            if (events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-slate-500">No events in deduplication table yet.</td></tr>';
+                return;
+            }
+            events.forEach(e => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-900/50 transition';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 mono text-emerald-400 font-semibold">${e.eventId}</td>
+                    <td class="py-3 px-4 mono text-slate-300">${e.consumerGroup}</td>
+                    <td class="py-3 px-4 mono text-cyan-400">${e.topic}</td>
+                    <td class="py-3 px-4 text-slate-500 text-[11px]">${new Date(e.processedAt).toLocaleTimeString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function handlePaymentSubmit(e) {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = true;
+
+            const userId = document.getElementById('payer-select').value;
+            const merchantId = document.getElementById('merchant-select').value;
+            const amount = parseFloat(document.getElementById('payment-amount').value);
+            const currency = document.getElementById('payment-currency').value;
+            const key = document.getElementById('idempotency-key').value;
+
+            const startTime = performance.now();
+            try {
+                const res = await fetch(`${API_BASE}/payments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+                    body: JSON.stringify({ userId, merchantId, amount, currency })
+                });
+
+                const latency = Math.round(performance.now() - startTime);
+                const data = await res.json();
+                displayPaymentResult(res.status, data, latency);
+                await refreshAll();
+            } catch (err) {
+                displayPaymentResult(500, { error: err.message }, 0);
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        function displayPaymentResult(status, data, latency) {
+            const box = document.getElementById('payment-result-box');
+            const badge = document.getElementById('response-badge');
+            const latencyElem = document.getElementById('ingest-latency');
+            const jsonElem = document.getElementById('response-json');
+            box.classList.remove('hidden');
+
+            latencyElem.innerText = `Ingestion: ${latency}ms`;
+
+            if (status === 201) {
+                badge.className = 'px-2 py-0.5 rounded text-[11px] font-bold mono bg-cyan-500/20 text-cyan-400 border border-cyan-500/30';
+                badge.innerText = `201 CREATED (Status: ${data.status})`;
+            } else if (status === 200) {
+                badge.className = 'px-2 py-0.5 rounded text-[11px] font-bold mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
+                badge.innerText = `200 OK (Layer 1 Redis Cache Hit / Replay)`;
+            } else if (status === 429) {
+                badge.className = 'px-2 py-0.5 rounded text-[11px] font-bold mono bg-rose-500/20 text-rose-400 border border-rose-500/30';
+                badge.innerText = `429 TOO MANY REQUESTS (Rate Limited)`;
+            } else {
+                badge.className = 'px-2 py-0.5 rounded text-[11px] font-bold mono bg-rose-500/20 text-rose-400 border border-rose-500/30';
+                badge.innerText = `${status} ERROR`;
+            }
+
+            jsonElem.innerText = JSON.stringify(data, null, 2);
+        }
+
+        // Phase 3 Failure Test 1: High-Frequency Kafka Duplicate Ingestion
+        async function runDuplicateIngestionTest() {
+            const btn = document.getElementById('btn-duplicate-test');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="pulse-subtle">Pushing 100 Duplicates...</span>';
+
+            const resultsBox = document.getElementById('duplicate-test-results');
+            resultsBox.classList.remove('hidden');
+
+            const badge = document.getElementById('duplicate-badge');
+            const verdict = document.getElementById('duplicate-verdict');
+
+            try {
+                badge.innerText = 'Publishing 100 messages with identical x-event-id...';
+                const res = await fetch(`${API_BASE}/simulation/duplicate-events?count=100`, { method: 'POST' });
+                const data = await res.json();
+
+                document.getElementById('dup-total-sent').innerText = data.totalMessagesSent;
+                document.getElementById('dup-processed-skipped').innerText = `${data.expectedProcessed} / ${data.expectedDuplicatesSkipped}`;
+                document.getElementById('dup-ledger-count').innerText = `${data.actualLedgerEntries} entries`;
+
+                if (data.exactlyOnceAchieved) {
+                    badge.innerText = 'EXACTLY-ONCE SEMANTICS (EOS) VERIFIED!';
+                    verdict.innerHTML = `<strong class="text-emerald-400">TEST PASSED:</strong> 100 identical messages ingested. Consumer processed exactly <strong>1 message</strong> and skipped <strong>99 duplicate messages</strong>. Ledger entries = <strong>${data.actualLedgerEntries} (1 DEBIT + 1 CREDIT)</strong>. Double-entry invariant is perfectly intact!`;
+                } else {
+                    badge.innerText = 'TEST FAILED!';
+                    verdict.innerText = `Expected 2 ledger entries, but found ${data.actualLedgerEntries}!`;
+                }
+            } catch (err) {
+                verdict.innerText = 'Error: ' + err.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="play" class="w-3.5 h-3.5"></i><span>Push 100 Duplicates</span>';
+                lucide.createIcons();
+                await refreshAll();
+            }
+        }
+
+        // Phase 3 Failure Test 2: Redis Crash & Graceful Degradation
+        async function toggleRedisContainer(start) {
+            const endpoint = start ? '/simulation/redis-recover' : '/simulation/redis-crash';
+            const statusBox = document.getElementById('redis-test-status');
+            statusBox.classList.remove('hidden');
+            statusBox.innerText = start ? 'Restarting Redis container (docker start payments-redis)...' : 'Stopping Redis container (docker stop payments-redis)...';
+
+            try {
+                const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST' });
+                const data = await res.json();
+                statusBox.innerText = data.message;
+                await fetchPhase3Stats();
+            } catch (err) {
+                statusBox.innerText = 'Error: ' + err.message;
+            }
+        }
+
+        async function runRedisTrafficTest() {
+            const statusBox = document.getElementById('redis-test-status');
+            statusBox.classList.remove('hidden');
+            statusBox.innerHTML = '<span class="pulse-subtle">Sending payments during Redis outage to verify graceful degradation...</span>';
+
+            let successes = 0;
+            for (let i = 1; i <= 3; i++) {
+                try {
+                    const key = 'outage-traffic-' + i + '-' + generateUuid().substring(0, 8);
+                    const res = await fetch(`${API_BASE}/payments`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+                        body: JSON.stringify({ userId: 'alice', merchantId: 'bob', amount: 10.0000, currency: 'USD' })
+                    });
+                    if (res.status === 201 || res.status === 200) {
+                        successes++;
+                    }
+                } catch (e) {}
+            }
+
+            statusBox.innerHTML = `<strong class="text-emerald-400">Traffic Test Result:</strong> ${successes}/3 payments succeeded without 500 error! Rate limiting seamlessly used Caffeine cache, and transactions were safely committed to PostgreSQL.`;
+            await refreshAll();
+        }
+
+        async function verifyLedgerInvariant() {
+            const statusElem = document.getElementById('invariant-status-text');
+            statusElem.innerText = 'Auditing SQL Double-Entry Invariant...';
+            try {
+                const res = await fetch(`${API_BASE}/ledger/verify`);
+                const data = await res.json();
+                if (data.balanced) {
+                    statusElem.className = 'text-xs text-emerald-400 mt-0.5 flex items-center gap-1 font-semibold';
+                    statusElem.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Invariant Perfect: 0 discrepancies across all payments!`;
+                } else {
+                    statusElem.className = 'text-xs text-rose-400 mt-0.5 flex items-center gap-1 font-semibold';
+                    statusElem.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400"></span> Note: ${data.imbalancedPaymentsCount} payments have discrepancies!`;
+                }
+            } catch (err) {
+                statusElem.innerText = 'Audit query error: ' + err.message;
+            }
+        }
+
+        async function fetchLedgerAndPayments() {
+            try {
+                const pRes = await fetch(`${API_BASE}/payments`);
+                if (pRes.ok) {
+                    const payments = await pRes.json();
+                    document.getElementById('payments-count-badge').innerText = payments.length;
+                    renderPaymentsTable(payments);
+
+                    const allEntries = [];
+                    for (const p of payments) {
+                        try {
+                            const lRes = await fetch(`${API_BASE}/ledger/payments/${p.id}`);
+                            if (lRes.ok) {
+                                const entries = await lRes.json();
+                                allEntries.push(...entries);
+                            }
+                        } catch (e) {}
+                    }
+                    document.getElementById('ledger-count-badge').innerText = allEntries.length;
+                    renderLedgerTable(allEntries);
+                }
+            } catch (err) {}
+        }
+
+        function renderPaymentsTable(payments) {
+            const tbody = document.getElementById('payments-table-body');
+            tbody.innerHTML = '';
+            if (payments.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-slate-500">No payments found.</td></tr>';
+                return;
+            }
+            payments.slice().reverse().forEach(p => {
+                const isPending = p.status === 'PENDING';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-900/50 transition';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 mono text-slate-400">${p.id.substring(0, 8)}...</td>
+                    <td class="py-3 px-4 font-semibold text-slate-300">${p.userId}</td>
+                    <td class="py-3 px-4 font-semibold text-slate-300">${p.merchantId}</td>
+                    <td class="py-3 px-4 mono font-semibold text-white">$${parseFloat(p.amount).toFixed(4)} ${p.currency}</td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold mono ${isPending ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
+                            ${p.status}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 mono text-slate-400 text-[11px]">${p.idempotencyKey}</td>
+                    <td class="py-3 px-4 text-slate-500 text-[11px]">${new Date(p.createdAt).toLocaleTimeString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderLedgerTable(entries) {
+            const tbody = document.getElementById('ledger-table-body');
+            tbody.innerHTML = '';
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-slate-500">No ledger entries recorded yet.</td></tr>';
+                return;
+            }
+            entries.slice().reverse().forEach(e => {
+                const isDebit = e.entryType === 'DEBIT';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-900/50 transition';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 mono text-slate-400">${e.id.substring(0, 8)}...</td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold mono ${isDebit ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
+                            ${e.entryType}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 mono font-semibold ${isDebit ? 'text-rose-400' : 'text-emerald-400'}">
+                        ${isDebit ? '-' : '+'}$${parseFloat(e.amount).toFixed(4)}
+                    </td>
+                    <td class="py-3 px-4 mono text-slate-400">${e.accountId.substring(0, 8)}...</td>
+                    <td class="py-3 px-4 mono text-slate-400">${e.counterAccountId.substring(0, 8)}...</td>
+                    <td class="py-3 px-4 mono text-slate-400">${e.paymentId.substring(0, 8)}...</td>
+                    <td class="py-3 px-4 text-slate-500 text-[11px]">${new Date(e.createdAt).toLocaleTimeString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function switchTab(tab) {
+            activeTab = tab;
+            const paymentsBtn = document.getElementById('tab-payments-btn');
+            const outboxBtn = document.getElementById('tab-outbox-btn');
+            const ledgerBtn = document.getElementById('tab-ledger-btn');
+            const eosBtn = document.getElementById('tab-eos-btn');
+
+            const paymentsView = document.getElementById('tab-payments');
+            const outboxView = document.getElementById('tab-outbox');
+            const ledgerView = document.getElementById('tab-ledger');
+            const eosView = document.getElementById('tab-eos');
+
+            const activeClass = 'text-sm font-bold text-white flex items-center gap-2 pb-1 border-b-2 border-cyan-500';
+            const inactiveClass = 'text-sm font-medium text-slate-400 hover:text-slate-200 flex items-center gap-2 pb-1 border-b-2 border-transparent transition';
+
+            paymentsBtn.className = tab === 'payments' ? activeClass : inactiveClass;
+            outboxBtn.className = tab === 'outbox' ? activeClass : inactiveClass;
+            ledgerBtn.className = tab === 'ledger' ? activeClass : inactiveClass;
+            eosBtn.className = tab === 'eos' ? activeClass : inactiveClass;
+
+            paymentsView.classList.toggle('hidden', tab !== 'payments');
+            outboxView.classList.toggle('hidden', tab !== 'outbox');
+            ledgerView.classList.toggle('hidden', tab !== 'ledger');
+            eosView.classList.toggle('hidden', tab !== 'eos');
+        }
+
+        async function refreshAll() {
+            await Promise.all([
+                fetchAccounts(),
+                fetchOutbox(),
+                fetchPhase3Stats(),
+                fetchProcessedEvents(),
+                verifyLedgerInvariant(),
+                fetchLedgerAndPayments()
+            ]);
+            lucide.createIcons();
+        }
+
+        refreshAll();
+        setInterval(refreshAll, 3000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: edge-api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: payment-service-route
+          uri: http://localhost:8080
+          predicates:
+            - Path=/payments/**, /accounts/**, /ledger/**, /outbox/**, /simulation/**, /webhooks/**, /reconciliation/**
+        - id: fraud-service-route
+          uri: http://localhost:8000
+          predicates:
+            - Path=/score/**, /health/**
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+
+gateway:
+  jwt:
+    secret: DistributedPaymentSystemSecretKey2026SecureJwtSigningKey
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

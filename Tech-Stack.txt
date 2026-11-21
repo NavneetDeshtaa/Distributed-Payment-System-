@@ -1,0 +1,19 @@
+Tech Stack : 
+
+Backend : 
+
+Payment Service	 - Java 17, Spring Boot 3.4.4, Mave  : Core payment processing, ledger, outbox
+API Gateway	Java 17, Spring Cloud Gateway : 	JWT auth, rate limiting, routing
+Fraud Service	Python 3.11, FastAPI	ML-based fraud detection pipeline
+
+
+Infrastructure
+
+Database	PostgreSQL 15  : Payments, ledger, outbox events
+Message Broker	Apache Kafka (Confluent 7.5)   : Event streaming, async fraud pipeline
+Cache	Redis 7   : 	Rate limiting, idempotency cache, WebSocket pub/sub
+Monitoring	Prometheus + Grafana   : Metrics collection and dashboards
+
+
+Frontend
+Dashboard : React 19, TypeScript, Vite, Tailwind CSS  : Real-time payment monitoring
