@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Play, AlertTriangle, CheckCircle2, RefreshCw, AlertCircle, FileSearch } from 'lucide-react';
-import { runReconciliation, getReconciliationAlerts } from '../services/api';
+import { ShieldCheck, Play, AlertTriangle, CheckCircle2, RefreshCw, AlertCircle, FileSearch, Trash2, Check } from 'lucide-react';
+import { runReconciliation, getReconciliationAlerts, resolveStalePayments } from '../services/api';
 
 export default function ReconciliationDashboard() {
   const [report, setReport] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolveSuccess, setResolveSuccess] = useState(null);
 
   const loadData = async () => {
     try {
@@ -33,6 +35,21 @@ export default function ReconciliationDashboard() {
     }
   };
 
+  const handleResolveStale = async () => {
+    setResolving(true);
+    setResolveSuccess(null);
+    try {
+      const res = await resolveStalePayments();
+      setResolveSuccess(res.message || 'Purged stale test payments');
+      await handleRunAudit();
+      setTimeout(() => setResolveSuccess(null), 4000);
+    } catch (e) {
+      console.error('Failed to resolve stale payments:', e);
+    } finally {
+      setResolving(false);
+    }
+  };
+
   const audits = [
     { id: 'stale', title: '1. STALE_PAYMENT', desc: 'Payments stuck in PENDING status for > 10 minutes', count: report?.stalePaymentsCount ?? 2 },
     { id: 'ghost', title: '2. GHOST_PAYMENT', desc: 'Outbox events marked PUBLISHED but missing in payments table', count: report?.ghostPaymentsCount ?? 0 },
@@ -54,19 +71,40 @@ export default function ReconciliationDashboard() {
               Verifies 5 core ledger invariants against database anomalies & emits critical alerts to <code className="text-indigo-600 bg-slate-100 px-1 py-0.5 rounded font-mono">reconciliation.alerts</code>
             </p>
           </div>
-          <button
-            onClick={handleRunAudit}
-            disabled={loading}
-            className={`self-start sm:self-auto px-4 py-2 rounded-lg font-semibold text-xs flex items-center gap-2 transition-all font-sans cursor-pointer ${
-              loading
-                ? 'bg-slate-300 text-slate-600 cursor-wait'
-                : 'bg-slate-900 hover:bg-slate-800 text-white shadow-xs'
-            }`}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Executing 5 Audits...' : 'Run On-Demand Audit'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleResolveStale}
+              disabled={resolving || loading}
+              title="Marks orphaned test transactions from earlier sessions as FAILED and purges alert history"
+              className={`px-3 py-2 rounded-lg font-semibold text-xs flex items-center gap-1.5 transition-all font-sans cursor-pointer ${
+                resolving
+                  ? 'bg-slate-200 text-slate-500 cursor-wait'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-amber-600" />
+              <span>{resolving ? 'Cleaning Stale...' : 'Clean Stale Test Payments'}</span>
+            </button>
+            <button
+              onClick={handleRunAudit}
+              disabled={loading}
+              className={`self-start sm:self-auto px-4 py-2 rounded-lg font-semibold text-xs flex items-center gap-2 transition-all font-sans cursor-pointer ${
+                loading
+                  ? 'bg-slate-300 text-slate-600 cursor-wait'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white shadow-xs'
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Executing 5 Audits...' : 'Run On-Demand Audit'}
+            </button>
+          </div>
         </div>
+        {resolveSuccess && (
+          <div className="mt-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-fade-in">
+            <Check className="w-4 h-4 text-emerald-600" />
+            <span>{resolveSuccess}</span>
+          </div>
+        )}
       </div>
 
       {/* 5 Audits Cards Grid */}

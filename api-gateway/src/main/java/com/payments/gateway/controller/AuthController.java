@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+@CrossOrigin(origins = "*", allowedHeaders = "*")
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -17,18 +18,32 @@ public class AuthController {
         this.jwtUtil = jwtUtil;
     }
 
-    @PostMapping("/token")
+    @RequestMapping(value = "/token", method = {RequestMethod.POST, RequestMethod.GET})
     public ResponseEntity<Map<String, Object>> mintToken(
-            @RequestParam(defaultValue = "alice") String userId,
-            @RequestParam(defaultValue = "ROLE_USER") String role) {
+            @RequestParam(required = false) String userId,
+            @RequestParam(defaultValue = "ROLE_USER") String role,
+            @RequestBody(required = false) Map<String, Object> body) {
 
-        String token = jwtUtil.generateToken(userId, List.of(role));
+        String effectiveUser = userId;
+        if (effectiveUser == null && body != null && body.containsKey("userId")) {
+            effectiveUser = String.valueOf(body.get("userId"));
+        }
+        if (effectiveUser == null || effectiveUser.trim().isEmpty()) {
+            effectiveUser = "alice";
+        }
+
+        String effectiveRole = role;
+        if (body != null && body.containsKey("role")) {
+            effectiveRole = String.valueOf(body.get("role"));
+        }
+
+        String token = jwtUtil.generateToken(effectiveUser, List.of(effectiveRole));
         return ResponseEntity.ok(Map.of(
                 "token", token,
                 "tokenType", "Bearer",
                 "expiresIn", 3600,
-                "userId", userId,
-                "roles", List.of(role)
+                "userId", effectiveUser,
+                "roles", List.of(effectiveRole)
         ));
     }
 }

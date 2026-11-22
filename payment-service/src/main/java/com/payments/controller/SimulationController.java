@@ -210,6 +210,15 @@ public class SimulationController {
         return ResponseEntity.ok(reconciliationService.getRecentAlerts());
     }
 
+    @PostMapping("/reconciliation/resolve-stale")
+    public ResponseEntity<Map<String, Object>> resolveStalePayments() {
+        int resolved = reconciliationService.resolveStalePayments();
+        return ResponseEntity.ok(Map.of(
+                "resolvedCount", resolved,
+                "message", "Successfully marked " + resolved + " stale test payments as FAILED and cleared alert queue."
+        ));
+    }
+
     /**
      * Phase 5: Webhooks Controller
      */

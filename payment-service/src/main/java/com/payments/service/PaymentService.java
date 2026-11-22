@@ -52,7 +52,6 @@ public class PaymentService {
     }
 
     /**
-     * Phase 3: High Ingestion Scale Payment Flow
      * 1. Rate Limiting: Token-bucket check via Redis Lua script (with in-memory Caffeine fallback).
      * 2. Layer 1 Cache: Redis GET idem:<key>. On hit, returns cached PaymentResponse (sub-ms, 0 DB load).
      * 3. Database ACID Transaction:
@@ -178,7 +177,7 @@ public class PaymentService {
 
     @Transactional(readOnly = true)
     public List<PaymentResponse> getAllPayments() {
-        return paymentRepository.findAll().stream()
+        return paymentRepository.findAllByOrderByCreatedAtDesc().stream()
                 .map(p -> toResponse(p, false))
                 .collect(Collectors.toList());
     }

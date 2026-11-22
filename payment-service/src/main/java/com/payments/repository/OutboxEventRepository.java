@@ -13,6 +13,8 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
 
     List<OutboxEvent> findTop50ByStatusOrderByCreatedAtAsc(OutboxEventStatus status);
 
+    List<OutboxEvent> findTop100ByStatusOrderByCreatedAtAsc(OutboxEventStatus status);
+
     List<OutboxEvent> findTop20ByOrderByCreatedAtDesc();
 
     long countByStatus(OutboxEventStatus status);

@@ -24,23 +24,58 @@ export async function fetchHealth() {
 }
 
 export async function mintJwtToken(userId = 'alice') {
-  const res = await fetch(`${GATEWAY_URL}/auth/token`, {
+  const res = await fetch(`${GATEWAY_URL}/auth/token?userId=${encodeURIComponent(userId)}&role=ROLE_USER`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, role: 'USER' })
+    body: JSON.stringify({ userId, role: 'ROLE_USER' })
   });
   if (!res.ok) throw new Error(`Auth failed: ${res.statusText}`);
-  return res.json();
+  const data = await res.json();
+  if (data?.token) {
+    try {
+      localStorage.setItem(`finscale_token_${userId}`, JSON.stringify({
+        token: data.token,
+        expiresAt: Date.now() + 3500 * 1000
+      }));
+    } catch (_) {}
+  }
+  return data;
+}
+
+export async function getOrMintToken(userId = 'alice') {
+  try {
+    const cached = localStorage.getItem(`finscale_token_${userId}`);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.token && parsed.expiresAt && Date.now() < parsed.expiresAt) {
+        return parsed.token;
+      }
+    }
+  } catch (_) {}
+
+  const mintRes = await mintJwtToken(userId);
+  return mintRes.token;
 }
 
 export async function submitPayment(paymentData, idempotencyKey, token = null, useGateway = true) {
   const baseUrl = useGateway ? GATEWAY_URL : PAYMENT_URL;
+  let authToken = token;
+
+  // Auto-acquire JWT if missing for Gateway routing
+  if (useGateway && !authToken) {
+    try {
+      authToken = await getOrMintToken(paymentData.userId || 'alice');
+    } catch (e) {
+      console.warn('Auto-mint token fallback failed:', e);
+    }
+  }
+
   const headers = {
     'Content-Type': 'application/json',
     'Idempotency-Key': idempotencyKey || crypto.randomUUID()
   };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
   }
 
   const res = await fetch(`${baseUrl}/payments`, {
@@ -61,12 +96,36 @@ export async function getPayment(paymentId) {
 export async function getAllPayments() {
   const res = await fetch(`${PAYMENT_URL}/payments`);
   if (!res.ok) return [];
-  return res.json();
+  const list = await res.json();
+  return list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
 
 export async function getAccounts() {
   const res = await fetch(`${PAYMENT_URL}/accounts`);
   if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getOutboxStatus() {
+  const res = await fetch(`${PAYMENT_URL}/outbox`);
+  if (!res.ok) return { newCount: 0, publishedCount: 0, failedCount: 0, recentEvents: [] };
+  return res.json();
+}
+
+export async function createAccount({ ownerId, initialBalance, currency = 'USD' }) {
+  const res = await fetch(`${PAYMENT_URL}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ownerId: ownerId.trim(),
+      initialBalance: parseFloat(initialBalance),
+      currency: currency.trim().toUpperCase()
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to create account (HTTP ${res.status})`);
+  }
   return res.json();
 }
 
@@ -125,6 +184,13 @@ export async function runReconciliation() {
 
 export async function getReconciliationAlerts() {
   const res = await fetch(`${PAYMENT_URL}/simulation/reconciliation/alerts`);
+  return res.json();
+}
+
+export async function resolveStalePayments() {
+  const res = await fetch(`${PAYMENT_URL}/simulation/reconciliation/resolve-stale`, {
+    method: 'POST'
+  });
   return res.json();
 }
 

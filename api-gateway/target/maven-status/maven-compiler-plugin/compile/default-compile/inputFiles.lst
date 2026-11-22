@@ -1,4 +1,5 @@
 C:\Users\navne\OneDrive\Desktop\DistributedPaymentSystem\api-gateway\src\main\java\com\payments\gateway\ApiGatewayApplication.java
+C:\Users\navne\OneDrive\Desktop\DistributedPaymentSystem\api-gateway\src\main\java\com\payments\gateway\config\CorsConfig.java
 C:\Users\navne\OneDrive\Desktop\DistributedPaymentSystem\api-gateway\src\main\java\com\payments\gateway\config\JwtUtil.java
 C:\Users\navne\OneDrive\Desktop\DistributedPaymentSystem\api-gateway\src\main\java\com\payments\gateway\controller\AuthController.java
 C:\Users\navne\OneDrive\Desktop\DistributedPaymentSystem\api-gateway\src\main\java\com\payments\gateway\controller\FallbackController.java

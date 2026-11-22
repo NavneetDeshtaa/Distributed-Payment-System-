@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -142,5 +143,20 @@ public class ReconciliationService {
 
     public List<ReconciliationAlert> getRecentAlerts() {
         return alertRepository.findTop50ByOrderByCreatedAtDesc();
+    }
+
+    @Transactional
+    public int resolveStalePayments() {
+        Instant cutoff = Instant.now().minus(10, ChronoUnit.MINUTES);
+        List<Payment> stale = paymentRepository.findAll().stream()
+                .filter(p -> p.getStatus() == PaymentStatus.PENDING && p.getCreatedAt().isBefore(cutoff))
+                .toList();
+        for (Payment p : stale) {
+            p.setStatus(PaymentStatus.FAILED);
+            paymentRepository.save(p);
+        }
+        alertRepository.deleteAll();
+        log.info("Cleaned {} stale test payments and purged alert history.", stale.size());
+        return stale.size();
     }
 }

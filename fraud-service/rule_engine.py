@@ -13,7 +13,7 @@ class RuleEngine:
     2. Amount Threshold Rejection (> $10,000)
     3. Sliding-Window Velocity Check via Redis Sorted Sets (>10 txns in 60s)
     """
-    def __init__(self, redis_host: str = "localhost", redis_port: int = 6380):
+    def __init__(self, redis_host: str = "127.0.0.1", redis_port: int = 6380):
         try:
             self.redis_client = redis.Redis(
                 host=redis_host,

@@ -43,10 +43,10 @@ public class OutboxPublisherService {
      * 3. Sets x-event-id header for Idempotent Consumer Deduplication (Phase 3).
      * 4. On Kafka broker ACK, marks outbox record as PUBLISHED.
      */
-    @Scheduled(fixedDelayString = "${payment.outbox.polling-rate-ms:1000}")
+    @Scheduled(fixedDelayString = "${payment.outbox.polling-rate-ms:200}")
     @Transactional
     public void publishPendingEvents() {
-        List<OutboxEvent> pendingEvents = outboxEventRepository.findTop50ByStatusOrderByCreatedAtAsc(OutboxEventStatus.NEW);
+        List<OutboxEvent> pendingEvents = outboxEventRepository.findTop100ByStatusOrderByCreatedAtAsc(OutboxEventStatus.NEW);
         if (pendingEvents.isEmpty()) {
             return;
         }
