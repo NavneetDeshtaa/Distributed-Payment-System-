@@ -52,7 +52,69 @@ A production-grade, polyglot distributed payment processing engine built across 
 
 ---
 
-## 2. Microservice Directory Structure
+## 2. Technology Stack & Ecosystem
+
+### 🌐 System Overview & Component Matrix
+
+| Layer / Domain | Technology | Version | Key Responsibilities & Architectural Role |
+| :--- | :--- | :--- | :--- |
+| **API Gateway & Edge** | **Spring Cloud Gateway** | `2024.0.0` / Boot `3.4.4` | Non-blocking reactive reverse proxy (Netty), HS256 JWT validation, request enrichment (`X-User-Id`), distributed trace ID injection |
+| **Core Service Engine** | **Java & Spring Boot** | `Java 17 (LTS)` / `3.4.4` | Double-entry accounting ledger, Transactional Outbox poller, Exactly-Once Semantics (EOS) consumer, dynamic backpressure controller |
+| **Relational Database** | **PostgreSQL** | `15.x` | ACID persistence, row-level concurrency locking (`@Version`), high-precision financial decimals (`NUMERIC(19,4)`), outbox storage |
+| **In-Memory Cache & Store** | **Redis** | `7-alpine` | Distributed token-bucket rate limiting (Lua scripts), L1 idempotency cache (`idem:<key>`, 24h TTL), sliding-window fraud velocity sets |
+| **Local Near-Cache Fallback**| **Caffeine Cache** | `3.x` | In-process resilient near-cache (W-TinyLFU eviction, 50,000 entries) providing zero-downtime rate limiter fallback if Redis disconnects |
+| **Event Streaming Broker** | **Apache Kafka** | `7.5.0` (Confluent) | Partition-ordered async event log (`payment.created`, `fraud.request`, `fraud.result`, `webhook.DLQ`), user affinity routing |
+| **Distributed Coordination** | **Apache ZooKeeper** | `7.5.0` | Kafka broker cluster consensus, leader election, and distributed partition metadata management |
+| **AI / Machine Learning** | **Python, FastAPI, Scikit-Learn** | `3.11+` / `0.110+` / `1.5+` | Polyglot microservice, unsupervised `IsolationForest` anomaly scoring, deterministic rules (currency, amounts, velocity) |
+| **Frontend Dashboard** | **React 19, Vite 8, Tailwind CSS v4** | `19.3` / `8.3` / `4.3` | Modern reactive UI, real-time metrics telemetry, double-entry ledger inspector, interactive fraud & chaos testing control center |
+| **Security & Cryptography** | **Auth0 Java JWT & HMAC-SHA256** | `4.4.0` | Stateless HS256 JWT signature verification, timing-attack-safe HMAC-SHA256 merchant webhook signatures (`X-Signature`), UUID v4 |
+| **Observability & Metrics** | **Prometheus & Grafana** | `v2.47.0` / `10.1.0` | Pull-based TSDB metric scraping via Micrometer `/actuator/prometheus`, pre-provisioned Grafana dashboards, system alerting |
+| **Containerization & Dev** | **Docker & Docker Compose** | `Compose v3.8` | Containerized virtualization for Kafka, Zookeeper, Redis, Prometheus, and Grafana; automated PowerShell orchestration |
+
+---
+
+### 🔍 Deep Dive by Architectural Layer
+
+#### 1. Backend Core & Microservices
+* **Java 17 (LTS)**: Core language platform utilizing modern record semantics, strong encapsulation, text blocks, and pattern matching.
+* **Spring Boot 3.4.4**: Production microservices framework running on Jakarta EE 10, delivering cloud-native dependency injection and unified configuration.
+* **Spring Cloud Gateway (2024.0.0)**: Fully reactive edge gateway built on Project Reactor and Netty. Eliminates thread-per-request overhead, handles CORS, and verifies JWT tokens at the boundary without hitting downstream databases.
+* **Spring Data JPA & Hibernate 6**: Persistence abstraction enforcing ACID transactions across ledger entries, handling composite primary keys for idempotency deduplication, and managing optimistic concurrency locking (`@Version`).
+* **HikariCP**: Production connection pooler tuned to **40 connections** for sub-millisecond connection acquisition while safeguarding PostgreSQL against connection exhaustion.
+
+#### 2. Event Streaming & Distributed Asynchrony
+* **Apache Kafka 7.5.0**: Distributed commit log with partition ordering keyed by `userId`, ensuring sequential consistency for payment workflows while isolating slow fraud evaluation.
+* **Spring Kafka**: High-throughput consumers and producers configured with consumer groups, manual ack semantics, and Dead Letter Queue (`webhook.DLQ`) routing.
+* **Transactional Outbox Engine**: Scheduled background poller (200ms fixed delay, batch size 100) streaming pending events to Kafka without distributed two-phase commits (2PC) or dual-write anomalies.
+* **Distributed Tracing Contract**: Custom `KafkaHeaderUtil` propagating `x-trace-id`, `x-correlation-id`, and `x-event-id` across Kafka record headers and SLF4J MDC.
+
+#### 3. Storage, In-Memory Caching & Resilient State
+* **PostgreSQL 15**: System of record for double-entry financial ledger lines, payments, outbox events, and reconciliation audit logs. Uses `NUMERIC(19,4)` to prevent IEEE 754 floating-point rounding errors.
+* **Redis 7**:
+  * *Idempotency L1 Cache*: Sub-millisecond lookup (`idem:<key>`) with 24-hour TTL, serving cached payment responses on replay without hitting PostgreSQL.
+  * *Distributed Rate Limiter*: Atomic Lua script (`INCR` + `EXPIRE`) executing server-side within Redis to prevent race conditions during burst traffic.
+  * *Sliding Window Velocity*: Redis Sorted Sets (`ZADD`, `ZREMRANGEBYSCORE`, `ZCARD`) calculating real-time user transaction frequencies.
+* **Caffeine Near-Cache**: Graceful fallback cache configured with a 2-minute TTL and 50,000 maximum size, maintaining rate limiting uptime even during complete Redis outages.
+
+#### 4. Machine Learning & Fraud AI Microservice
+* **FastAPI (0.110+) & Uvicorn (0.30+)**: Asynchronous ASGI Python service providing sub-15ms ML inference and continuous Kafka event processing via `librdkafka`.
+* **Scikit-Learn (1.5+) & NumPy (1.26+)**: Unsupervised `IsolationForest` machine learning model evaluating feature vectors (`amount`, `is_high_value`, `currency_risk`). Normalized anomaly scores $\ge 0.75$ flag fraudulent activity.
+* **Confluent-Kafka (2.4+)**: High-speed C-native Kafka client for low-latency request-reply message consumption from `fraud.request` and production to `fraud.result`.
+
+#### 5. Frontend & Operations Dashboard
+* **React 19 (19.3+)**: State management and UI components featuring React Actions and live microservice health polling.
+* **Vite 8 (8.3+)**: Fast build engine with native ESM, hot module replacement, and optimized production chunking.
+* **Tailwind CSS v4 (4.3+)**: Modern utility-first styling with `@tailwindcss/vite` integration, dark/light contrast management, and responsive layouts.
+* **Lucide React & KaTeX**: Comprehensive vector iconography and KaTeX mathematical typesetting for rendering ledger invariants.
+
+#### 6. Security, Compliance & Observability
+* **Auth0 Java JWT (4.4.0)**: Stateless HMAC-SHA256 token verification at the edge gateway.
+* **HMAC-SHA256 Webhook Verification**: Constant-time signature comparison preventing timing attacks on merchant webhook deliveries.
+* **Prometheus & Grafana**: Automated scraper capturing JVM metrics, HikariCP connection stats, Kafka consumer lag, and HTTP latency histograms.
+
+---
+
+## 3. Microservice Directory Structure
 
 ```
 DistributedPaymentSystem/
@@ -101,7 +163,7 @@ DistributedPaymentSystem/
 
 ---
 
-## 3. Implemented Phases & Core Features
+## 4. Implemented Phases & Core Features
 
 ### Phase 1: Core Transactional Payment Engine
 * **ACID Double-Entry Accounting**: Every settled payment records balanced `DEBIT` and `CREDIT` entries. Verified by invariant query: $\sum \text{DEBIT} = \sum \text{CREDIT} = \text{Amount}$.
@@ -145,7 +207,7 @@ DistributedPaymentSystem/
 
 ---
 
-## 4. Quick Start & Execution
+## 5. Quick Start & Execution
 
 ### Prerequisites
 * **Java 17+** (JDK 17)
@@ -197,7 +259,7 @@ run.bat
 
 ---
 
-## 5. Live Service Endpoints
+## 6. Live Service Endpoints
 
 | Service | Port | Endpoint URL | Description |
 | :--- | :--- | :--- | :--- |
@@ -214,7 +276,7 @@ run.bat
 
 ---
 
-## 6. Running the Verification Test Suite
+## 7. Running the Verification Test Suite
 
 Run the master automated verification script:
 
@@ -232,7 +294,7 @@ powershell -File scripts/test-all.ps1
 
 ---
 
-## 7. Performance Benchmarks, Latency & Scaling Architecture
+## 8. Performance Benchmarks, Latency & Scaling Architecture
 
 All metrics below are **empirically measured** on the live running distributed system under multi-threaded concurrent burst load:
 
