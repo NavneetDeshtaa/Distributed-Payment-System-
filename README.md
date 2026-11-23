@@ -64,12 +64,12 @@ A production-grade, polyglot distributed payment processing engine built across 
 | **In-Memory Cache & Store** | **Redis** | `7-alpine` | Distributed token-bucket rate limiting (Lua scripts), L1 idempotency cache (`idem:<key>`, 24h TTL), sliding-window fraud velocity sets |
 | **Local Near-Cache Fallback**| **Caffeine Cache** | `3.x` | In-process resilient near-cache (W-TinyLFU eviction, 50,000 entries) providing zero-downtime rate limiter fallback if Redis disconnects |
 | **Event Streaming Broker** | **Apache Kafka** | `7.5.0` (Confluent) | Partition-ordered async event log (`payment.created`, `fraud.request`, `fraud.result`, `webhook.DLQ`), user affinity routing |
-| **Distributed Coordination** | **Apache ZooKeeper** | `7.5.0` | Kafka broker cluster consensus, leader election, and distributed partition metadata management |
+| **Distributed Coordination** | **Kafka Raft (KRaft)** | `7.5.0` | Native in-broker consensus quorum (`@kafka:29093`), metadata management, zero ZooKeeper overhead |
 | **AI / Machine Learning** | **Python, FastAPI, Scikit-Learn** | `3.11+` / `0.110+` / `1.5+` | Polyglot microservice, unsupervised `IsolationForest` anomaly scoring, deterministic rules (currency, amounts, velocity) |
 | **Frontend Dashboard** | **React 19, Vite 8, Tailwind CSS v4** | `19.3` / `8.3` / `4.3` | Modern reactive UI, real-time metrics telemetry, double-entry ledger inspector, interactive fraud & chaos testing control center |
 | **Security & Cryptography** | **Auth0 Java JWT & HMAC-SHA256** | `4.4.0` | Stateless HS256 JWT signature verification, timing-attack-safe HMAC-SHA256 merchant webhook signatures (`X-Signature`), UUID v4 |
 | **Observability & Metrics** | **Prometheus & Grafana** | `v2.47.0` / `10.1.0` | Pull-based TSDB metric scraping via Micrometer `/actuator/prometheus`, pre-provisioned Grafana dashboards, system alerting |
-| **Containerization & Dev** | **Docker & Docker Compose** | `Compose v3.8` | Containerized virtualization for Kafka, Zookeeper, Redis, Prometheus, and Grafana; automated PowerShell orchestration |
+| **Containerization & Dev** | **Docker & Docker Compose** | `Compose v3.8` | Containerized virtualization for Kafka (KRaft), Redis, Prometheus, and Grafana; automated PowerShell orchestration |
 
 ---
 
@@ -155,7 +155,7 @@ DistributedPaymentSystem/
 ├── scripts/              # Consolidated Verification & Chaos Engineering Scripts
 │   ├── test-all.ps1      # Master Automated Test Suite
 │   └── verify-ledger-invariant.sql
-├── docker-compose.yml    # Kafka, ZooKeeper, Redis 7, Prometheus, Grafana
+├── docker-compose.yml    # Kafka (KRaft), Redis 7, Prometheus, Grafana
 ├── pom.xml               # Multi-Module Parent Aggregator POM
 ├── run.bat & run.ps1     # One-Click System Launchers
 └── README.md
