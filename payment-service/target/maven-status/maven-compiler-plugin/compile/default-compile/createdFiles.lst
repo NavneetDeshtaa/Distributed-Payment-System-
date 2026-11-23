@@ -1,4 +1,5 @@
 com\payments\dto\LedgerVerificationResult.class
+com\payments\config\KafkaTopicConfig.class
 com\payments\repository\MerchantWebhookRepository.class
 com\payments\repository\PaymentRepository.class
 com\payments\entity\OutboxEvent.class
